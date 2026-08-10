@@ -43,6 +43,7 @@ import { TriggerEditor, type TriggerValue } from "./TriggerEditor";
 import { HandoffKeywordsInput } from "./HandoffKeywordsInput";
 import { FollowupFlowPicker } from "./FollowupFlowPicker";
 import { PainelDoOperador } from "./PainelDoOperador";
+import { PainelDeSeguranca } from "./PainelDeSeguranca";
 import { FunisDoAgente, type CoberturaPorFunil } from "./FunisDoAgente";
 import { PublishConfirmDialog } from "./PublishConfirmDialog";
 import {
@@ -241,7 +242,7 @@ export function AgentForm(props: Props) {
    * navegação — o rascunho é um só, e uma URL por papel faria o usuário achar
    * que salvou um e não o outro.
    */
-  const [papel, setPapel] = React.useState<"conversa" | "operacao">("conversa");
+  const [papel, setPapel] = React.useState<"conversa" | "operacao" | "seguranca">("conversa");
 
   const dirty = JSON.stringify(form) !== JSON.stringify(baseline);
 
@@ -457,6 +458,10 @@ export function AgentForm(props: Props) {
           [
             ["conversa", "Conversa com o cliente"],
             ["operacao", "Organiza o sistema"],
+            // O TERCEIRO PAPEL. O rótulo diz o que ele FAZ, como os outros dois:
+            // "Segurança" é o nosso nome; quem configura quer saber o que é
+            // conferido antes de a mensagem chegar ao cliente dele.
+            ["seguranca", "Confere antes de enviar"],
           ] as const
         ).map(([id, rotulo]) => (
           <button
@@ -476,6 +481,8 @@ export function AgentForm(props: Props) {
           </button>
         ))}
       </div>
+
+      {papel === "seguranca" ? <PainelDeSeguranca /> : null}
 
       {papel === "operacao" ? (
         <PainelDoOperador

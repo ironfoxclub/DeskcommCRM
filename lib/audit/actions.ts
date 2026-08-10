@@ -135,6 +135,10 @@ export type AuditAction =
   | "ai.org_memory_entry_updated"
   /** Provedor/modelo de um ponto do sistema que usa IA foi trocado no painel. */
   | "ai.purpose_binding_updated"
+  // Ligar/desligar uma das duas verificações que consultam modelo. Auditável
+  // porque muda o que o sistema confere antes de falar com o cliente — e porque
+  // custa dinheiro por mensagem.
+  | "ai.guardrail_layer_changed"
   | "ai_agent.run_started"
   | "ai_agent.run_completed"
   | "ai_agent.run_failed"

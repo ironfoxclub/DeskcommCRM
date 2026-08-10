@@ -42,7 +42,11 @@ export const KIND_LABEL = {
   // Diz o que o CLIENTE está esperando, não o que o sistema deixou de gravar.
   // "Promessa não cumprida" é a única frase que faz o dono do negócio agir: do
   // lado de lá existe uma pessoa que ouviu um compromisso e está aguardando.
-  promise_unfulfilled: "O assistente prometeu algo a um cliente e ninguém cumpriu ainda",
+  // "ninguém cumpriu" é um veredito que NENHUMA linha de código apura — o
+  // sistema não sabe se a promessa foi cumprida, e agendar um retorno não é
+  // cumprir. "ninguém ficou responsável" é exatamente o que `apuraDonoDaPromessa`
+  // mede: houve ferramenta neste turno? há retorno vivo? Se não, ninguém assumiu.
+  promise_unfulfilled: "O assistente prometeu algo a um cliente e ninguém ficou responsável",
   contact_proposal_expired:
     "Uma informação que o assistente ouviu de um cliente venceu sem ninguém conferir",
   other: "Aviso do assistente",
@@ -62,4 +66,55 @@ export const SEVERITY_LABEL: Record<AgentInboxSeverity, string> = {
  */
 export function kindLabel(kind: string): string {
   return (KIND_LABEL as Record<string, string>)[kind] ?? "Aviso do assistente";
+}
+
+/** Por que ninguém ficou responsável — o que muda é a AÇÃO que cabe a quem lê. */
+export type PromessaSemDono =
+  | "operador_sem_ferramentas"
+  | "operador_nao_agiu"
+  | "operador_nao_rodou";
+
+/**
+ * O texto do aviso de promessa sem responsável.
+ *
+ * ═══ A REGRA DE ESCRITA, E POR QUE ELA É ESTREITA ═══
+ *
+ * Nenhuma frase daqui afirma que a promessa foi ou não foi CUMPRIDA. O sistema
+ * não sabe: agendar um retorno não é cumprir, e mandar uma mensagem depois
+ * também não. O que ele apura é se **alguém ficou responsável**, e é só isso que
+ * o texto pode dizer. A versão anterior afirmava "o sistema ainda não registrou
+ * o cumprimento" — um veredito que nenhuma linha de código tinha apurado, no
+ * único item que esta feature mostra ao dono do negócio.
+ *
+ * As três variantes dizem o MESMO fato e mudam só a ação: sem capacidade
+ * marcada, o caminho é a tela do assistente; com capacidade e sem ação, é
+ * decidir sobre este cliente. Um texto único mandaria metade das pessoas para o
+ * lugar errado.
+ */
+export function copyDaPromessaSemDono(
+  quantas: number,
+  porque: PromessaSemDono,
+): { title: string; body: string } {
+  const title =
+    quantas === 1
+      ? "O assistente prometeu algo ao cliente e ninguém ficou responsável"
+      : `${quantas} promessas ao cliente sem ninguém responsável`;
+
+  const CORPO: Record<PromessaSemDono, string> = {
+    operador_sem_ferramentas:
+      "Nesta conversa o assistente combinou algo com o cliente. Ele ainda não tem nenhuma " +
+      "capacidade marcada para registrar isso no sistema, então nada foi agendado nem anotado. " +
+      "Abra a conversa para ver o que foi combinado — e, na tela do assistente, marque o que ele " +
+      "pode fazer.",
+    operador_nao_agiu:
+      "Nesta conversa o assistente combinou algo com o cliente e não registrou nenhum próximo " +
+      "passo para isso — não há retorno agendado. Abra a conversa, veja o que foi combinado e " +
+      "decida quem faz.",
+    operador_nao_rodou:
+      "Nesta conversa o assistente combinou algo com o cliente, e a parte que organiza o sistema " +
+      "não rodou neste atendimento. Nada foi agendado. Abra a conversa para ver o que foi " +
+      "combinado e decida quem faz.",
+  };
+
+  return { title, body: CORPO[porque] };
 }

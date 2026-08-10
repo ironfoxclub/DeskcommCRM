@@ -10760,6 +10760,41 @@ create trigger trg_ai_agent_versions_content_immutable
 
 notify pgrst, 'reload schema';
 
+-- ---- camadas de segurança por organização (migration 0142) ----
+--
+-- As duas verificações que consultam um modelo (e por isso custam por mensagem)
+-- passam a ser escolha da organização, na tela do agente, em vez de variável de
+-- ambiente do worker — que é por PROCESSO e só alcançável por quem edita o .env
+-- da VPS e reinicia o contêiner.
+--
+-- AUSÊNCIA DE LINHA NÃO É "DESLIGADO": sem linha, vale o ambiente. É o que
+-- mantém intacta a instalação que já decidiu isso no .env — aplicar este bloco
+-- não muda o comportamento de ninguém, só cria a porta.
+--
+-- `layer` sem CHECK, de propósito (vocabulário ABERTO, CLAUDE.md): um clone com
+-- valor que este build não conhece quebraria o update.sh. O vocabulário vive no
+-- TypeScript.
+--
+-- Idempotente e auto-curativo: `create table if not exists` + `drop policy if
+-- exists` antes do `create policy`. Nenhuma função nova, então não há grant a
+-- revogar aqui.
+
+create table if not exists public.org_guardrail_layers (
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  layer text not null,
+  enabled boolean not null,
+  updated_at timestamptz not null default now(),
+  primary key (organization_id, layer)
+);
+
+alter table public.org_guardrail_layers enable row level security;
+
+drop policy if exists tenant_isolation_org_guardrail_layers_all on public.org_guardrail_layers;
+create policy tenant_isolation_org_guardrail_layers_all on public.org_guardrail_layers
+  using (organization_id in (select public.fn_user_org_ids()))
+  with check (organization_id in (select public.fn_user_org_ids()));
+
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

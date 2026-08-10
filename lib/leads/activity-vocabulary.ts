@@ -40,7 +40,8 @@ export type ActivityType =
   | "reactivation_expired"
   | "followup_scheduled"
   | "followup_cancelled"
-  | "demand_closed";
+  | "demand_closed"
+  | "promise_unowned";
 
 export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   lead_created: "Entrou pelo WhatsApp",
@@ -84,6 +85,15 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   // retomar, para não repropor o que uma pessoa já desmarcou.
   followup_scheduled: "Retorno agendado",
   followup_cancelled: "Retorno cancelado",
+  // PROMESSA SEM RESPONSÁVEL. Entra na timeline pelo mesmo critério do
+  // `diffCheckpoint`: só o que muda o que alguém faria a seguir. Turno em que o
+  // Operador AGIU não gera linha própria — as ferramentas dele já geram as delas
+  // (`stage_changed`, `followup_scheduled`), e uma segunda linha dizendo "o
+  // Operador trabalhou" é o ruído que o diff existe para matar.
+  //
+  // O rótulo não diz "não cumprida": o sistema não apura cumprimento, apura se
+  // alguém assumiu.
+  promise_unowned: "Promessa sem responsável",
   // ENCERRAR É O OUTRO LADO do invariante 4: uma demanda aberta precisa de
   // próximo passo OU de desfecho registrado. Fechar como ganho ou perdido era
   // invisível na timeline — só existia em audit e event_log, que ninguém lê na
