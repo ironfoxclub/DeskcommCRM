@@ -8,6 +8,34 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [1.7.0] — 2026-08-27
+
+### Adicionado
+
+- **Agenda: marcar, remarcar e cancelar compromissos pela tela** O sistema ganhou uma Agenda. Dá para criar tipos de compromisso, ver a grade da
+  semana, marcar um horário e remarcar ou cancelar pela própria tela, com o motivo
+  registrado. A IA também consegue consultar os horários livres e marcar durante o
+  atendimento, sem ninguém sair da conversa.
+
+  Quem usa Google Agenda pode conectar a sua conta em Configurações, e os
+  compromissos passam a aparecer nos dois lados. Isso é opcional: sem conectar, a
+  Agenda funciona igual, e quem não mexer em nada não precisa fazer coisa alguma
+  depois de atualizar.
+
+### Corrigido
+
+- **A versão só é publicada pelo caminho da release** Uma correção no nosso próprio processo de publicação, feita antes de causar
+  problema: o sistema que cria a versão decidia apenas por haver um número novo
+  escrito no histórico de mudanças. Bastava alguém escrever esse número junto de
+  outra alteração para a versão sair sozinha, sem passar pela aprovação. Agora ele
+  exige também a marca de que aquilo foi de fato um fechamento de versão.
+
+- **A tela de atualização mostra tudo o que mudou desde a sua versão** Antes ela mostrava só o texto da versão mais nova. Quem pulava versões — por
+  exemplo, quem estava na 1.4.0 e atualizava direto para a 1.6.0 — nunca via o que
+  tinha mudado no meio do caminho, e isso incluía os avisos de coisas que exigiam
+  a sua ação. Agora a tela lista todas as versões entre a sua e a nova, com os
+  avisos reunidos no topo e cada um dizendo de que versão veio.
+
 ## [1.6.0] — 2026-08-26
 
 ### Adicionado
@@ -969,7 +997,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/melgarafael/DeskcommCRM/compare/v1.5.0...HEAD
+[Não lançado]: https://github.com/melgarafael/DeskcommCRM/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.6.0...v1.7.0
 [1.5.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/melgarafael/DeskcommCRM/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.3.0...v1.4.0
