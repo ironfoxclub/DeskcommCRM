@@ -765,8 +765,11 @@ test.describe("followup flow builder — controle de gatilho na PublishBar (Task
       // Só o que tem motor de enrollment é oferecido. Eram 2 até a frente de
       // gatilhos entregar o produtor de `stage_change`
       // (`lib/followup/gatilho-etapa.ts`), e viraram 4 com `case_opened`
-      // (`lib/followup/gatilho-caso.ts`); `conversation_end` continua fora,
-      // porque continua sem produtor — e o publish o recusa.
+      // (`lib/followup/gatilho-caso.ts`), e 5 com `webhook` — a ação de automação
+      // `start_message_flow` chama `enrollFollowupFlow`, o MESMO caminho do POST
+      // de enrollments, e o publish passou a aceitá-lo em `KINDS_COM_MOTOR`.
+      // `conversation_end` continua fora, porque continua sem produtor — e o
+      // publish o recusa.
       //
       // ⚠️ A LISTA, E NÃO A CONTAGEM. Este bloco cobrava `toHaveCount(3)`, e o
       // gatilho novo o derrubou — uma spec alheia vermelha por uma mudança que
@@ -776,7 +779,7 @@ test.describe("followup flow builder — controle de gatilho na PublishBar (Task
       // coisas — e é o que o operador de fato vê.
       const kindSelect = panel.getByRole("combobox");
       await kindSelect.click();
-      const OFERECIDOS = ["Manual", "Silêncio", "Etapa do funil", "Agente pediu ajuda"];
+      const OFERECIDOS = ["Manual", "Silêncio", "Etapa do funil", "Agente pediu ajuda", "Automação (Webhooks)"];
       for (const nome of OFERECIDOS) {
         await expect(page.getByRole("option", { name: nome, exact: true })).toBeVisible();
       }

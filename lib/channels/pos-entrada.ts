@@ -43,7 +43,6 @@ import { garantirLeadDaConversa } from "@/lib/leads/nascimento-do-lead";
 import { logger } from "@/lib/logger";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { ehPedidoDeOptOut } from "@/lib/opt-out/deteccao";
-import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -115,9 +114,36 @@ export async function aplicarEfeitosPosEntrada(
 ): Promise<void> {
   await aplicarOptOut(admin, entrada);
   await abrirDemanda(admin, entrada);
+  /**
+   * O acelerador do pipeline entra por import DINÂMICO, e não é estilo.
+   *
+   * `lib/dev/kick-local-pipeline.ts` puxa, estaticamente, o motor de follow-up
+   * inteiro — `event-log/drain`, `register-handlers`, `followup/engine`,
+   * `reactivity` —, e essa cadeia termina em `@/lib/env`, que faz `throw` no TOPO
+   * do módulo quando falta variável obrigatória. Importado estaticamente daqui, o
+   * grafo passa a carregar junto com a ROTA QUE RECEBE MENSAGEM: numa instalação
+   * com `.env` mais enxuto, o webhook do WhatsApp morreria no boot por causa de
+   * um acelerador acessório.
+   *
+   * É a mesma lei que `lib/event-log/drain-loop.ts` já escreve para a mesma
+   * cadeia. E o custo foi MEDIDO, com os três sítios ligados e desligados
+   * juntos, no caso de `tests/unit/channel-health-aviso.test.ts` que importa
+   * `@/lib/waha/ingest` dentro do `it()`:
+   *
+   *     os três estáticos    1 failed — timeout em 15053ms, arquivo em 42,74s
+   *     os três dinâmicos    22/22   — arquivo em 31,91s
+   *
+   * ⚠️ E a ressalva que a primeira redação deste comentário não tinha: devolver
+   * UM só dos três ao estático NÃO reproduz o vermelho (22/22, 6,06s). Ou seja,
+   * o que estoura o orçamento é a soma, e o vermelho aparece quando a máquina
+   * está sob carga — é FRAGILIDADE, não falha determinística. O argumento que
+   * não depende de relógio nenhum é o de cima: a rota que recebe mensagem não
+   * deve carregar o motor de follow-up para subir.
+   */
   // A resposta do lead avança o follow-up AQUI. O despacho do agente (LLM)
   // vem depois: no Hobby ele estoura o tempo da request e o próximo texto
   // do fluxo ficava esperando o relógio.
+  const { acelerarPipelineDeEventos } = await import("@/lib/dev/kick-local-pipeline");
   await acelerarPipelineDeEventos(admin, {
     organizationId: entrada.organizationId,
     contactId: entrada.contactId,

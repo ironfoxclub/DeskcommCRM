@@ -32,7 +32,6 @@ import { origemDaPagina, registrarCaptacao } from "@/lib/webhooks/captacao";
 import { ipDoClienteParaInet } from "@/lib/http/ip-do-cliente";
 import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
 import { ApiError } from "@/lib/api/types";
-import { kickLocalPipeline } from "@/lib/dev/kick-local-pipeline";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -626,6 +625,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
 
   // Captação: drena lead.created e inscreve no fluxo neste mesmo request.
   // Sem isto, em prod (Vercel Hobby sem cron de 1 min) o gatilho fica pending.
+  const { kickLocalPipeline } = await import("@/lib/dev/kick-local-pipeline");
   await kickLocalPipeline(
     admin,
     contactId

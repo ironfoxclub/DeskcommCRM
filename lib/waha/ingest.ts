@@ -14,7 +14,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { audit } from "@/lib/audit";
 import { sincronizarSaudeDaConexao } from "@/lib/channels/health";
 import { aplicarEfeitosPosEntrada } from "@/lib/channels/pos-entrada";
-import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 import { canonicalPhoneBR } from "@/lib/channels/phone-variants";
 import { estamparAtribuicaoDoContato } from "@/lib/leads/atribuicao-de-anuncio";
 import { extrairAtribuicaoWaha } from "@/lib/waha/atribuicao-de-anuncio";
@@ -574,6 +573,7 @@ async function handleInbound(
     const existente = await mensagemIngeridaPorExternalId(admin, session.organization_id, p.id);
     if (existente) {
       try {
+        const { acelerarPipelineDeEventos } = await import("@/lib/dev/kick-local-pipeline");
         await acelerarPipelineDeEventos(admin, {
           organizationId: session.organization_id,
           contactId: existente.contact_id,
