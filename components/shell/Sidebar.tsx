@@ -355,6 +355,7 @@ export function SidebarContent({
 export function Sidebar({ collapsed }: { collapsed: boolean }) {
   return (
     <aside
+      data-casca="sidebar"
       className={cn(
         // ⚠️ `sticky`, e NUNCA `fixed`.
         //

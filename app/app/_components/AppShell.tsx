@@ -32,7 +32,7 @@ export function AppShell({ sidebarCollapsed, podeAtender, children }: AppShellPr
   // gerente está presente.
   useSinalDePresenca(podeAtender);
   return (
-    <div className="flex min-h-screen w-full bg-background">
+    <div data-casca="raiz" className="flex min-h-screen w-full bg-background">
       <BarraDeProgressoNavegacao />
       <div className="hidden md:block">
         <Sidebar collapsed={sidebarCollapsed} />
@@ -56,9 +56,9 @@ export function AppShell({ sidebarCollapsed, podeAtender, children }: AppShellPr
         SEGUNDA medida da mesma coisa — a que discordava e deixava a barra por
         cima da lista.
       */}
-      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
+      <div data-casca="coluna" className="flex min-h-screen min-w-0 flex-1 flex-col">
         <TopBar />
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+        <main data-casca="conteudo" className="flex-1 overflow-auto p-6">{children}</main>
       </div>
     </div>
   );
