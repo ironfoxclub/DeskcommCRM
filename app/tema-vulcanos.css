@@ -1,0 +1,230 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Tema VulcanOS (fork IronFox) — só no modo ESCURO.
+
+   Replica a casca do VulcanOS (vulcanos-app/src/components/app-shell.tsx):
+   breu quente #13100F com manchas vinho em degradê, granulado por cima,
+   sidebar sem fundo e o conteúdo numa placa de vidro fosco flutuante.
+
+   Mora num arquivo só, e sem layer, de propósito:
+   - arquivo só → juntar atualizações do DeskcommCRM original quase nunca
+     conflita; os componentes só ganharam atributos `data-casca`.
+   - sem layer → CSS sem layer vence todo utilitário do Tailwind (que mora em
+     `@layer utilities`), então não precisa de `!important`.
+
+   A cor de marca injetada por `lib/branding/css.ts` (`:root:root[data-theme]`,
+   especificidade 0,3,0) continua vencendo a rampa vinho daqui (0,2,0): quem
+   configurar outra cor em /admin/marca vê a dele.
+
+   O modo CLARO não é tocado por nada deste arquivo.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root[data-theme="dark"] {
+  /* Superfícies */
+  --color-bg: #13100f;
+  --color-surface: #1a1613;
+  --color-surface-elevated: #221d19;
+  --color-overlay: rgba(0, 0, 0, 0.6);
+
+  /* Texto — o #E9E8E2 do VulcanOS */
+  --color-text: #e9e8e2;
+  --color-text-muted: #9c9891;
+  --color-text-subtle: #6f6b65;
+
+  /* Bordas — o branco quente a 10% do VulcanOS */
+  --color-border: rgba(233, 232, 226, 0.1);
+  --color-border-strong: rgba(233, 232, 226, 0.18);
+
+  /* Acento — rampa vinho a partir do #630102 */
+  --color-accent-50: #fdf3f3;
+  --color-accent-100: #fbe4e4;
+  --color-accent-200: #f5c6c6;
+  --color-accent-300: #ec9a9b;
+  --color-accent-400: #df6365;
+  --color-accent-500: #c93538;
+  --color-accent-600: #a8191c;
+  --color-accent-700: #8a0203;
+  --color-accent-800: #630102;
+  --color-accent-900: #4a0102;
+  --color-accent-950: #2a0001;
+  --color-accent: var(--color-accent-400);
+  --color-accent-fg: #13100f;
+  --color-accent-soft: rgba(99, 1, 2, 0.28);
+  --color-accent-hover: var(--color-accent-300);
+  --ring: var(--color-accent-400);
+
+  /* Barra de rolagem vinho, como no VulcanOS */
+  scrollbar-color: #630102 transparent;
+}
+
+/* ── Fundo: breu + manchas vinho + granulado ──────────────────────────────── */
+
+[data-theme="dark"] [data-casca="raiz"] {
+  position: relative;
+  isolation: isolate;
+  background-color: #13100f;
+}
+
+[data-theme="dark"] [data-casca="raiz"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(99, 1, 2, 0.14), transparent 35%),
+    radial-gradient(circle at 85% 10%, rgba(233, 232, 226, 0.03), transparent 32%),
+    radial-gradient(circle at 50% 100%, rgba(99, 1, 2, 0.1), transparent 48%);
+}
+
+[data-theme="dark"] [data-casca="raiz"]::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ── Sidebar: sem fundo e sem bordas, flutuando sobre o degradê ───────────── */
+
+/* `> *` pega só o cabeçalho (border-b) e o rodapé (border-t) da barra; os
+   filetes entre grupos e o ponto de saúde da conexão ficam como estão. */
+[data-theme="dark"] [data-casca="sidebar"],
+[data-theme="dark"] [data-casca="sidebar"] > * {
+  border-color: transparent;
+}
+
+[data-theme="dark"] [data-casca="sidebar"] {
+  background-color: transparent;
+}
+
+/* Item ativo: vinho a 20% com o ícone em vinho (VulcanOS), e não a pílula
+   sólida da cor de acento. */
+[data-theme="dark"] [data-casca="sidebar"] a[aria-current="page"] {
+  background-color: rgba(99, 1, 2, 0.28);
+  color: var(--color-text);
+}
+
+[data-theme="dark"] [data-casca="sidebar"] a[aria-current="page"] svg {
+  color: var(--color-accent-400);
+}
+
+[data-theme="dark"] [data-casca="sidebar"] a:not([aria-current="page"]):hover,
+[data-theme="dark"] [data-casca="sidebar"] button:hover {
+  background-color: rgba(233, 232, 226, 0.05);
+  color: var(--color-text);
+}
+
+/* Logo enviado: o produto põe uma moldura BRANCA atrás dele no escuro (logo
+   escuro sumiria no fundo). Aqui a moldura sai e o logo vira silhueta clara no
+   #E9E8E2 da marca, como o símbolo do VulcanOS. Serve ao logo da IronFox,
+   que é de uma cor só; um logo colorido perderia as cores. */
+[data-theme="dark"] [data-casca="sidebar"] .dark\:bg-white {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+[data-theme="dark"] [data-casca="sidebar"] .dark\:bg-white img {
+  filter: brightness(0) invert(0.92);
+}
+
+/* ── Barra do topo: transparente, só um filete embaixo ────────────────────── */
+
+[data-theme="dark"] [data-casca="topo"] {
+  background-color: transparent;
+  border-color: rgba(233, 232, 226, 0.08);
+}
+
+/* ── Placa de vidro do conteúdo (só a partir de tablet) ───────────────────
+   No VulcanOS o conteúdo rola DENTRO da placa, e não a página: é o que deixa
+   a placa com os quatro cantos arredondados sempre à vista. Aqui é igual — a
+   raiz trava na altura da tela e o <main> (que já é `overflow-auto`) rola.
+
+   `--casca-respiro` é a margem da placa; a caixa de entrada desconta ela da
+   própria altura (components/inbox/InboxLayout.tsx), senão o composer
+   nasceria 24px abaixo da borda. */
+
+@media (min-width: 768px) {
+  [data-theme="dark"] [data-casca="raiz"] {
+    --casca-respiro: 12px;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  [data-theme="dark"] [data-casca="coluna"] {
+    height: calc(100dvh - 2 * var(--casca-respiro));
+    min-height: 0;
+    margin: var(--casca-respiro) var(--casca-respiro) var(--casca-respiro) 0;
+    overflow: hidden;
+    /* Contorno, e não borda: borda ocupa 2px da altura e a caixa de entrada,
+       que é medida para caber exato, passaria a rolar esses 2px. */
+    outline: 1px solid rgba(233, 232, 226, 0.1);
+    outline-offset: -1px;
+    border-radius: 16px;
+    background-color: rgba(19, 16, 15, 0.7);
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    box-shadow:
+      0 10px 40px 0 rgba(0, 0, 0, 0.35),
+      0 40px 120px 20px rgba(0, 0, 0, 0.5);
+  }
+
+  [data-theme="dark"] [data-casca="conteudo"] {
+    min-height: 0;
+  }
+}
+
+/* ── Botão principal e selos: vinho sólido com texto claro ──────────────────
+   Como os botões do VulcanOS (`bg-[#630102] text-[#E9E8E2]`). O acento em si
+   continua claro (#df6365 ou o que a marca derivar) porque também pinta
+   TEXTO e ícone sobre o breu, onde o #630102 seria ilegível. O item ativo da
+   sidebar tem regra própria acima, mais específica. */
+[data-theme="dark"] .bg-accent.text-accent-foreground {
+  background-color: #630102;
+  color: #e9e8e2;
+}
+
+[data-theme="dark"] .bg-accent.text-accent-foreground.hover\:bg-accent-hover:hover {
+  background-color: #8a0203;
+}
+
+/* ── Cartões: camada de vidro dentro da placa ─────────────────────────────── */
+
+[data-theme="dark"] [data-casca="conteudo"] .bg-card,
+[data-theme="dark"] [data-casca="conteudo"] .bg-surface {
+  background-color: rgba(233, 232, 226, 0.035);
+}
+
+/* ── Pop-ups (menus, selects, popovers, janelas): vidro fosco ─────────────── */
+
+[data-theme="dark"] .bg-popover,
+[data-theme="dark"] [role="dialog"].bg-background,
+[data-theme="dark"] [role="alertdialog"].bg-background {
+  background-color: rgba(26, 22, 19, 0.82);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] [role="dialog"].bg-background,
+[data-theme="dark"] [role="alertdialog"].bg-background {
+  border-color: rgba(233, 232, 226, 0.12);
+}
+
+/* Item em foco nos menus: realce discreto, não a pílula de acento. */
+[data-theme="dark"] .bg-popover [role="menuitem"]:focus,
+[data-theme="dark"] .bg-popover [role="menuitem"][data-highlighted],
+[data-theme="dark"] .bg-popover [role="option"]:focus,
+[data-theme="dark"] .bg-popover [role="option"][data-highlighted] {
+  background-color: rgba(233, 232, 226, 0.07);
+  color: var(--color-text);
+}
+
+/* Fundo escurecido atrás das janelas: menos preto chapado, um pouco de blur. */
+[data-theme="dark"] .bg-black\/80[data-state] {
+  background-color: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}

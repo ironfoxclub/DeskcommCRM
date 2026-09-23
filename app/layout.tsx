@@ -24,6 +24,8 @@ import { ThemeProvider } from "@/lib/theme";
 import { Providers } from "./providers";
 import { PublicEnvScript } from "./public-env-script";
 import "./globals.css";
+// Fork IronFox: visual do VulcanOS no modo escuro (ver o próprio arquivo).
+import "./tema-vulcanos.css";
 
 const atkinson = Atkinson_Hyperlegible({
   subsets: ["latin", "latin-ext"],
