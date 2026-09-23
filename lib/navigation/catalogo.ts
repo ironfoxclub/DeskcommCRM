@@ -133,6 +133,17 @@ export const NAV_CATALOG = [
   },
   // ---- Atendimento — onde o operador passa o dia ----
   {
+    // Primeira porta e tela inicial (`homeDaInterface`). Para caber sem estourar
+    // a dobra de 900px do `navegacao.spec.ts`, Roteadores saiu do sidebar e
+    // ficou no hub de IA — configura-se poucas vezes, e o Painel se abre todo dia.
+    href: "/app/painel",
+    label: "Painel",
+    description: "A operação de hoje numa tela só: conversas, funil, tarefas e agenda.",
+    icon: "Gauge",
+    group: "atendimento",
+    sidebar: true,
+  },
+  {
     href: "/app/inbox",
     label: "Inbox",
     description: "As conversas de WhatsApp, com você e a IA atendendo lado a lado.",
@@ -424,7 +435,8 @@ export const NAV_CATALOG = [
     group: "ia",
     section: "Montar o agente",
     minRole: "manager",
-    sidebar: true,
+    // Saiu do sidebar para dar lugar ao Painel (ver a entrada `/app/painel`).
+    // A porta continua no hub "Ver tudo em IA" e no ⌘K.
   },
   {
     href: "/app/ai/credentials",

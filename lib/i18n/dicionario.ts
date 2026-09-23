@@ -11580,6 +11580,34 @@ export const DICIONARIO: Traducoes = {
   },
   "Versão não encontrada para esta skill.": { es: "No se encontró esa versión para esta skill." },
   "Versão da skill não encontrada.": { es: "No se encontró la versión de la skill." },
+
+  // ─── Painel (app/app/painel) ───────────────────────────────────────────────
+  Painel: { es: "Panel" },
+  "A operação de hoje numa tela só: conversas, funil, tarefas e agenda.": {
+    es: "La operación de hoy en una sola pantalla: conversaciones, embudo, tareas y agenda.",
+  },
+  "A operação de hoje numa tela só. Clique num widget para ir até a tela dele.": {
+    es: "La operación de hoy en una sola pantalla. Haz clic en un widget para ir a su pantalla.",
+  },
+  "em andamento": { es: "en curso" },
+  "Com a IA": { es: "Con la IA" },
+  Comigo: { es: "Conmigo" },
+  "Nenhum funil criado ainda.": { es: "Todavía no hay ningún embudo creado." },
+  "Leads em aberto por etapa do funil": { es: "Leads abiertos por etapa del embudo" },
+  "Leads novos": { es: "Leads nuevos" },
+  "14 dias": { es: "14 días" },
+  "Leads novos por dia nos últimos 14 dias": { es: "Leads nuevos por día en los últimos 14 días" },
+  "Fechados no mês": { es: "Cerrados en el mes" },
+  ganhos: { es: "ganados" },
+  "Taxa de ganho": { es: "Tasa de cierre" },
+  "Para hoje": { es: "Para hoy" },
+  "Agenda de hoje": { es: "Agenda de hoy" },
+  "Nenhum compromisso marcado para hoje.": { es: "No hay citas agendadas para hoy." },
+  "A confirmar": { es: "Por confirmar" },
+  WhatsApp: { es: "WhatsApp" },
+  conectados: { es: "conectados" },
+  "Arraste os widgets para reorganizar.": { es: "Arrastra los widgets para reorganizarlos." },
+  "Restaurar ordem": { es: "Restaurar orden" },
 };
 
 /**
