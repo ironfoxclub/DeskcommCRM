@@ -47,6 +47,10 @@ function renderPainel(overrides: Partial<React.ComponentProps<typeof PainelDoOpe
     toolIds: [],
     onToolIdsChange: vi.fn(),
     modeloDoConversador: "claude-sonnet-4-6",
+    // A medida do papel é do agente DESTA página (ver
+    // `operador-metrica-e-do-agente-da-tela.test.ts`): sem o id, o painel não
+    // tem o que pedir.
+    agentId: "aaaaaaaa-0000-4000-8000-00000000000a",
     ...overrides,
   };
   // O ModelPicker busca modelos por react-query; sem o provider ele estoura.

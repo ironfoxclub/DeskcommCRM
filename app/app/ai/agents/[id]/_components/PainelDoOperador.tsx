@@ -36,6 +36,8 @@ interface Props {
   onToolIdsChange: (ids: string[]) => void;
   /** o modelo do Conversador, para dizer o que "herdar" significa na prática. */
   modeloDoConversador: string;
+  /** O agente desta página. A medida do papel é DELE — ver `ComoOPapelEstaIndo`. */
+  agentId: string | null;
   disabled?: boolean;
 }
 
@@ -52,8 +54,8 @@ interface Props {
  * "quis agir e não pôde" é o único que aponta uma ação de configuração — por isso
  * vem com o caminho, não só com a contagem.
  */
-function ComoOPapelEstaIndo() {
-  const m = useOperatorMetrics(true);
+function ComoOPapelEstaIndo({ agentId }: { agentId: string | null }) {
+  const m = useOperatorMetrics(true, agentId);
   if (m.data === undefined) return null;
   const { turnos, agiu, promessas, quisAgirENaoPode, dias } = m.data;
 
@@ -106,7 +108,7 @@ export function PainelDoOperador(props: Props) {
 
   return (
     <div className="space-y-4">
-      {props.enabled ? <ComoOPapelEstaIndo /> : null}
+      {props.enabled ? <ComoOPapelEstaIndo agentId={props.agentId} /> : null}
       <Card className="space-y-3 p-4">
         <div className="flex items-start gap-3">
           <Switch

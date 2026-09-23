@@ -37,13 +37,21 @@ export const dynamic = "force-dynamic";
 /** Janela fixa. Um seletor de período aqui seria configuração antes de haver uso. */
 const DIAS = 30;
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
   const user = await requireAuth();
   const org = await resolveActiveOrg(user);
   if (!org) return fail("no_active_org", "nenhuma organização ativa", 400);
   if (ROLE_RANK[org.role] < ROLE_RANK.manager) {
     return fail("forbidden", "requer papel de gerente ou superior", 403);
   }
+
+  /**
+   * QUAL agente. O painel que consome isto vive em `/app/ai/agents/[id]` e as
+   * frases dele mandam agir sobre AQUELE agente ("marcar abaixo"). Agregar a
+   * organização inteira ali aponta ação concreta e errada quando há mais de um
+   * agente — que é o desenho normal (lista, roteadores, mapa por funil).
+   */
+  const agenteDaTela = new URL(req.url).searchParams.get("agent_id");
 
   const db = await createClient();
   const desde = new Date(Date.now() - DIAS * 24 * 60 * 60 * 1000).toISOString();
@@ -57,12 +65,15 @@ export async function GET(): Promise<Response> {
     return count ?? 0;
   }
   function base() {
-    return db
+    const q = db
       .from("event_log")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", org!.orgId)
       .eq("event_type", "agent.operator_turn")
       .gte("created_at", desde);
+    // A chave é a que `registrarDesfecho` grava. Filtrar por uma que ninguém
+    // escreve casa zero linha e o painel zera em silêncio — pior que agregar.
+    return agenteDaTela === null ? q : q.eq("payload->>agent_id", agenteDaTela);
   }
 
   try {
