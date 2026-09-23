@@ -181,6 +181,29 @@ beforeAll(() => {
             (organization_id, contact_id, campo, valor_proposto, expires_at)
             values (v_org, v_contact, 'email', 'rls-invariant@exemplo.test', now() + interval '7 days');
         end if;
+
+        -- demandas / demanda_conversas (migrations 0136 e 0138): a UNIDADE DE
+        -- PROPÓSITO do sistema. A linha guarda quem é o cliente (contact_id), o
+        -- que ele pediu (assunto), o que foi prometido a ele (proximo_passo) e o
+        -- desfecho — é o dossiê do atendimento inteiro, e vaza contato + teor.
+        --
+        -- Semeada EXPLICITAMENTE e não pelo trigger trg_demanda_abre_no_inbound
+        -- (0138), que já criaria uma demanda a partir da mensagem inbound acima:
+        -- depender do trigger amarraria este invariante ao comportamento de
+        -- outro, e o dia em que o trigger mudasse a semente sumiria em silêncio —
+        -- o controle positivo passaria a reprovar por falta de linha, não por
+        -- falha de RLS, e as duas coisas se leem igual no relatório.
+        if not exists (select 1 from public.demandas where organization_id = v_org) then
+          insert into public.demandas
+            (organization_id, contact_id, origem, estado, dono_kind, assunto)
+            values (v_org, v_contact, 'manual', 'aberta', 'ia', 'RLS invariant demanda');
+        end if;
+
+        if not exists (select 1 from public.demanda_conversas where organization_id = v_org) then
+          insert into public.demanda_conversas (organization_id, demanda_id, conversation_id)
+            select v_org, d.id, v_conv from public.demandas d
+             where d.organization_id = v_org limit 1;
+        end if;
       end loop;
     end
     $seed$;
@@ -212,6 +235,14 @@ const TABLES = [
   "knowledge_searches",
   // migration 0123 (spec 17 §4b) — guarda e-mail/telefone ditos na conversa.
   "contact_field_proposals",
+  // migrations 0136/0138 (#202) — a demanda é a unidade de propósito: carrega
+  // contato, assunto, o que foi prometido e o desfecho. Entrou na `main` com
+  // policy escrita e NUNCA exercitada: medido nesta triagem que
+  // `alter table public.demandas disable row level security` deixava o job
+  // `invariants` VERDE. É este par de linhas que transforma a policy em
+  // comportamento provado.
+  "demandas",
+  "demanda_conversas",
 ] as const;
 
 describe("RLS tenant isolation (fn_user_org_ids pattern)", () => {
