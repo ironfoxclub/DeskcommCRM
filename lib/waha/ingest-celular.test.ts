@@ -41,8 +41,18 @@ interface Duplo {
   rpcs: Array<{ fn: string; args: Record<string, unknown> }>;
 }
 
-/** Admin de mentira com um "banco" em memória só de `messages`. */
-function bancoDeMentira(preexistentes: Array<Partial<LinhaMessage>> = []): Duplo {
+/**
+ * Admin de mentira com um "banco" em memória só de `messages`.
+ *
+ * `naJanelaDaCorrida` roda UMA vez, logo depois da consulta de dedup e antes do
+ * insert — é a janela real do check-then-act (entre os dois cabem os RPCs de
+ * contato e conversa). Sem ele não há como exercitar o caminho que de fato
+ * fecha a fresta: o 23505 do insert.
+ */
+function bancoDeMentira(
+  preexistentes: Array<Partial<LinhaMessage>> = [],
+  naJanelaDaCorrida?: (messages: LinhaMessage[]) => void,
+): Duplo {
   const messages: LinhaMessage[] = preexistentes.map((m, i) => ({
     id: `pre-${i + 1}`,
     organization_id: "org-1",
@@ -70,6 +80,11 @@ function bancoDeMentira(preexistentes: Array<Partial<LinhaMessage>> = []): Duplo
         const achou = messages.find(
           (m) => m.organization_id === org && m.external_id !== null && externos.includes(m.external_id),
         );
+        if (naJanelaDaCorrida) {
+          const corrida = naJanelaDaCorrida;
+          naJanelaDaCorrida = undefined;
+          corrida(messages);
+        }
         return { data: achou ? { id: achou.id } : null, error: null };
       },
     };
@@ -141,7 +156,11 @@ describe("mensagem digitada no celular do dono (fromMe)", () => {
     await dispatchWahaEvent(admin as never, SESSION as never, envelope(CELULAR_NOWEB), "req-1");
 
     expect(messages, "a mensagem do celular sumiu — o webhook devolveu 200 e nada foi gravado").toHaveLength(1);
-    expect(messages[0]!.external_id).toBe(CELULAR_NOWEB.id);
+    // A CAUDA, não o id como o webhook o mandou (issue #196). O composto do
+    // NOWEB carrega o chat do engine (`@lid`), e era essa diferença de string
+    // que fazia o unique não pegar o eco do próprio envio. Ver
+    // `canonicalExternalId` em lib/channels/types.ts.
+    expect(messages[0]!.external_id).toBe("2A1B890FB8AA87730CBC");
     expect(messages[0]!.direction).toBe("outbound");
     expect(messages[0]!.body).toBe("respondi por aqui mesmo");
     expect(messages[0]!.sent_via).toBe("external_device");
@@ -319,6 +338,58 @@ describe("eco do próprio envio", () => {
     await dispatchWahaEvent(admin as never, SESSION as never, envelope(CELULAR_NOWEB), "req-1");
 
     expect(messages, "se virou 1, a janela foi fechada — atualize este caso").toHaveLength(2);
+  });
+
+  it("o eco chegando NA JANELA da corrida bate no 23505 — o atalho não é a garantia", async () => {
+    // ⚠️ O CASO QUE O ATALHO NÃO COBRE, e por causa do qual a chave precisou
+    // virar canônica. A consulta de dedup roda ANTES dos dois RPCs (contato e
+    // conversa); nesse intervalo o envio pelo CRM carimba a chave. O
+    // check-then-act perde a corrida e chega ao insert achando que é a
+    // primeira linha.
+    //
+    // Quem fecha a fresta é o unique — e ele SÓ pega porque as duas trilhas
+    // agora gravam a mesma string. Com o composto de um lado e a cauda do
+    // outro, este insert entrava e a frase aparecia duas vezes.
+    const { admin, messages } = bancoDeMentira([], (banco) => {
+      banco.push({
+        id: "do-envio",
+        organization_id: "org-1",
+        external_id: "2A1B890FB8AA87730CBC",
+        direction: "outbound",
+        body: "respondi por aqui mesmo",
+        sent_via: "ai",
+      });
+    });
+
+    await dispatchWahaEvent(admin as never, SESSION as never, envelope(CELULAR_NOWEB), "req-1");
+
+    expect(messages, "o eco entrou mesmo com a chave já tomada — a fresta continua aberta").toHaveLength(1);
+    expect(messages[0]!.id).toBe("do-envio");
+  });
+
+  it("WEBJS não regride: o eco do `_serialized` casa com o que o envio gravou", async () => {
+    // ⚠️ O CASO QUE REPROVA A CORREÇÃO PELA METADE. No WEBJS as duas trilhas já
+    // gravavam a MESMA string (o `_serialized` completo), então ali o unique JÁ
+    // era a rede. Normalizar só este lado quebraria o que funcionava; o envio
+    // também normaliza, então os dois continuam iguais — agora na cauda.
+    const { admin, messages } = bancoDeMentira([
+      { organization_id: "org-1", external_id: "3EB0ABCDEF", direction: "outbound", sent_via: "ai" },
+    ]);
+
+    await dispatchWahaEvent(
+      admin as never,
+      SESSION as never,
+      envelope({
+        id: "true_5511999999999@c.us_3EB0ABCDEF",
+        from: "5599888888888@c.us",
+        to: "5511999999999@c.us",
+        fromMe: true,
+        body: "resposta pelo WhatsApp Web",
+      }),
+      "req-1",
+    );
+
+    expect(messages, "o eco do WEBJS virou segunda linha").toHaveLength(1);
   });
 
   it("o dedup é por organização — o eco de outro tenant não bloqueia o meu", async () => {

@@ -62,7 +62,8 @@ describe("intervaloDeEspera", () => {
   });
 
   it("o teto limita a soneca de um job distante", () => {
-    // Sem o Math.min o laço dormiria através da janela do INBOUND_DEBOUNCE_MS.
+    // Sem o Math.min o laço dormiria através da janela do INBOUND_DEBOUNCE_MS
+    // (o teto testado aqui é o do POLL, não o dela — ver env.ts).
     expect(intervaloDeEspera(9_000, INTERVALOS)).toBe(2_000);
   });
 });

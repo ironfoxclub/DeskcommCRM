@@ -135,3 +135,59 @@ describe('adapter WAHA', () => {
     });
   });
 });
+
+/**
+ * Issue #196 — a chave que o banco compara.
+ *
+ * `messages_org_external_id_unique` compara STRING. Enquanto o envio gravava a
+ * cauda e o eco do mesmo envio (que volta pelo webhook) gravava o composto, o
+ * unique nunca disparava e a mesma frase virava duas linhas na conversa.
+ */
+describe('canonicalExternalId — a forma única da chave nos dois engines', () => {
+  /** Payload real capturado numa instalação, engine NOWEB. */
+  const NOWEB_ECO = 'true_250302204792918@lid_2A1B890FB8AA87730CBC';
+  const NOWEB_ENVIO = '2A1B890FB8AA87730CBC';
+  /** WEBJS manda o `_serialized` completo dos DOIS lados. */
+  const WEBJS_SERIALIZADO = 'true_5511999999999@c.us_3EB0ABCDEF';
+
+  it('NOWEB: as duas pontas do mesmo id convergem', () => {
+    const a = getAdapter('waha');
+    expect(a.canonicalExternalId!(NOWEB_ECO)).toBe(a.canonicalExternalId!(NOWEB_ENVIO));
+    expect(a.canonicalExternalId!(NOWEB_ECO)).toBe(NOWEB_ENVIO);
+  });
+
+  it('WEBJS não regride: os dois lados continuam iguais depois de normalizar', () => {
+    // ⚠️ O CASO QUE REPROVA A CORREÇÃO PELA METADE. No WEBJS as duas trilhas já
+    // gravavam a MESMA string, então ali o unique JÁ era a rede. Normalizar só o
+    // webhook melhoraria o NOWEB e QUEBRARIA o WEBJS — o envio ficaria com o
+    // composto e o eco com a cauda. Normalizar os dois mantém a igualdade.
+    const a = getAdapter('waha');
+    expect(a.canonicalExternalId!(WEBJS_SERIALIZADO)).toBe(a.canonicalExternalId!(WEBJS_SERIALIZADO));
+    expect(a.canonicalExternalId!(WEBJS_SERIALIZADO)).toBe('3EB0ABCDEF');
+  });
+
+  it('é ponto fixo: normalizar de novo devolve o mesmo (o backfill depende disso)', () => {
+    const a = getAdapter('waha');
+    const uma = a.canonicalExternalId!(NOWEB_ECO);
+    expect(a.canonicalExternalId!(uma)).toBe(uma);
+  });
+
+  it('o composto reconstruído NÃO serve: o chat do eco é do engine, o do envio é do cadastro', () => {
+    // A alternativa que parece simétrica e falha exatamente em quem tem contato
+    // @lid — a instalação de onde a issue veio. O envio só conhece o cadastro
+    // (telefone → `@c.us`); o eco chega com a identidade opaca do WhatsApp.
+    const a = getAdapter('waha');
+    const doCadastro = a.resolveRecipient({
+      isGroup: false,
+      groupChatId: null,
+      phoneNumber: '+5525030220479',
+      waIdentity: 'phone:+5525030220479',
+    });
+    const candidatos = a.echoExternalIds!({ externalId: NOWEB_ENVIO, recipient: doCadastro! });
+    expect(candidatos, 'o composto montado pelo envio casou com o do eco — cenário irreal').not.toContain(
+      NOWEB_ECO,
+    );
+    // E a cauda casa, que é o ponto.
+    expect(a.canonicalExternalId!(NOWEB_ECO)).toBe(a.canonicalExternalId!(NOWEB_ENVIO));
+  });
+});

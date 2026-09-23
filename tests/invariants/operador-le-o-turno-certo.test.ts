@@ -10,7 +10,8 @@
  *
  * E ela é alcançável com os defaults do produto: a fila ordena por
  * `(priority, run_after)`, o job do Operador nasce com `run_after = now()` e o
- * inbound nasce com `now() + INBOUND_DEBOUNCE_MS` (8s). Uma mensagem que chega
+ * inbound nasce com `now() + INBOUND_DEBOUNCE_MS` (o default está em env.ts;
+ * subiu para 20 s na issue #196 — conferir lá, não aqui). Uma mensagem que chega
  * enquanto o turno corrente ainda fecha é servida antes, e o Operador N acorda
  * lendo a declaração N+1 — a mesma promessa executada duas vezes, e um aviso
  * aberto duas vezes para uma promessa só.

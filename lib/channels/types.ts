@@ -152,6 +152,37 @@ export interface ChannelAdapter {
   echoExternalIds?(input: { externalId: string; recipient: string }): string[];
 
   /**
+   * A forma CANÔNICA de um id deste canal — a única que pode ser gravada em
+   * `messages.external_id`.
+   *
+   * `echoExternalIds` resolve o mesmo problema pela LEITURA: lista as formas
+   * possíveis e procura por todas. Isso não fecha fresta nenhuma, porque a
+   * `unique (organization_id, external_id)` — a rede que deveria impedir a
+   * mensagem duplicada — compara STRING, não intenção. Se as duas trilhas de
+   * escrita (o envio pelo CRM e o eco do mesmo envio voltando pelo webhook)
+   * gravam formas diferentes do MESMO id, o 23505 nunca dispara e a segunda
+   * linha nasce.
+   *
+   * Medido no payload real da issue #196, com o WAHA/NOWEB:
+   *
+   *     eco (webhook): true_250302204792918@lid_2A1B890FB8AA87730CBC
+   *     envio (CRM):   2A1B890FB8AA87730CBC                 iguais? false
+   *
+   * ⚠️ POR QUE NÃO RECONSTRUIR O COMPOSTO nos dois lados, que seria o simétrico
+   * disto: o chat do eco vem do ENGINE (`@lid`, a identidade opaca que o
+   * WhatsApp está adotando) e o do envio vem do NOSSO cadastro (`@c.us`, o
+   * telefone). Medido: para um contato cadastrado por telefone, o candidato que
+   * o envio monta é `true_5525030220479@c.us_2A1B…` e o eco gravou
+   * `true_250302204792918@lid_2A1B…` — a chave voltaria a divergir exatamente
+   * em quem tem contato `@lid`, que é a instalação de onde a issue veio. A
+   * cauda é a única parte que os dois lados sempre têm.
+   *
+   * OPCIONAL: canal simétrico (o mesmo id nos dois lados, como o `wamid.` da
+   * Meta) não implementa, e quem chama grava o id como veio.
+   */
+  canonicalExternalId?(externalId: string): string;
+
+  /**
    * O telefone por trás de um identificador opaco, quando o canal souber.
    *
    * OPCIONAL: nem todo canal tem identidade opaca, e nem todo que tem sabe

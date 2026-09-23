@@ -69,7 +69,7 @@ function conversationRow(): Row {
  * linhas sobraram", então um fake de linha única responderia sempre 1 e o teste
  * passaria sem tocar no defeito.
  */
-function makeSupabase(preexistentes: Row[] = []) {
+function makeSupabase(preexistentes: Row[] = [], naJanelaDaCorrida?: (messages: Row[]) => void) {
   const messages: Row[] = [...preexistentes];
 
   const filtrar = (filtros: Array<(r: Row) => boolean>) => messages.filter((r) => filtros.every((f) => f(r)));
@@ -135,6 +135,14 @@ function makeSupabase(preexistentes: Row[] = []) {
           },
           then(resolve: (v: { error: null }) => unknown) {
             for (const alvo of filtrar(filtros)) messages.splice(messages.indexOf(alvo), 1);
+            // A JANELA REAL: entre a remoção do eco e o carimbo do id cabe o
+            // webhook. Roda uma vez só — a segunda remoção (a do tratamento do
+            // 23505) tem de encontrar o banco já sem a corrida.
+            if (naJanelaDaCorrida) {
+              const corrida = naJanelaDaCorrida;
+              naJanelaDaCorrida = undefined;
+              corrida(messages);
+            }
             return Promise.resolve({ error: null }).then(resolve);
           },
         };
@@ -269,5 +277,96 @@ describe('o que a correção NÃO pode apagar', () => {
     await sendMessageHandler(supabase, ctx, input);
 
     expect(messages.find((m) => m.id === 'crm-1'), 'apagou uma linha que não era eco de dispositivo').toBeDefined();
+  });
+});
+
+/**
+ * Issue #196 — o que o `delete` sozinho não alcançava.
+ *
+ * O eco não chega com o chat que o CRM conhece: o engine manda a identidade
+ * opaca (`@lid`) e o cadastro tem o telefone (`@c.us`). Reconstruir o composto
+ * no envio nunca casaria com o do webhook — medido no adapter
+ * (channel-adapter-waha.test.ts). O que casa é a CAUDA, gravada pelas duas
+ * trilhas; e o que fecha a corrida residual é o 23505 do unique.
+ */
+describe('a chave canônica e a corrida que sobra', () => {
+  /** Como o webhook grava a linha depois da canonicalização: a cauda. */
+  function ecoCanonico(over: Row = {}): Row {
+    return ecoDoWebhook({ id: 'eco-lid', external_id: BARE, ...over });
+  }
+
+  it('eco de chat @lid é removido, embora o envio só conheça o @c.us do cadastro', async () => {
+    wahaRespondendo(BARE);
+    const { supabase, messages } = makeSupabase([ecoCanonico()]);
+
+    await sendMessageHandler(supabase, ctx, input);
+
+    expect(messages, 'a mesma frase ficou duas vezes na conversa').toHaveLength(1);
+    expect(messages[0]!.sent_via, 'ficou com a linha do webhook e a autoria se perdeu').toBe('user');
+    expect(messages[0]!.external_id).toBe(BARE);
+  });
+
+  it('eco que chega ENTRE a remoção e o carimbo: uma linha, `sent`, nunca `queued`', async () => {
+    // ⚠️ A ARMADILHA DA CONSTRAINT DEFERIDA. `messages_org_external_id_unique` é
+    // `DEFERRABLE INITIALLY DEFERRED`: o UPDATE não falha na hora, a violação
+    // estoura no COMMIT. Quem ignora esse erro deixa a linha em `queued` — com
+    // a mensagem JÁ ENTREGUE — e o watchdog a reenvia a cada tique.
+    wahaRespondendo(BARE);
+    const { supabase, messages } = makeSupabase([], (banco) => {
+      banco.push(ecoCanonico({ id: 'eco-atrasado' }));
+    });
+
+    const msg = await sendMessageHandler(supabase, ctx, input);
+
+    expect(messages, 'o eco atrasado virou segunda linha').toHaveLength(1);
+    expect(msg.status, 'ficou em queued com a mensagem entregue').toBe('sent');
+    expect(msg.external_id).toBe(BARE);
+    expect(messages[0]!.sent_via).toBe('user');
+  });
+
+  it('WEBJS: o envio grava a CAUDA do `_serialized`, e não a string inteira', async () => {
+    // ⚠️ A METADE DA CORREÇÃO QUE O LADO DO WEBHOOK NÃO COBRE. No WEBJS o
+    // transporte devolve o `_serialized` completo no ENVIO; o webhook manda a
+    // mesma string. Se só o webhook normalizasse, o envio ficaria com o
+    // composto e o eco com a cauda — as duas trilhas voltariam a divergir,
+    // agora ao contrário. Aqui o eco já está gravado na cauda (é o que o
+    // ingest faz) e o envio tem de convergir para ela.
+    const SERIALIZADO = 'true_5531999998888@c.us_3EB0WEBJS';
+    const CAUDA = '3EB0WEBJS';
+    vi.stubEnv('WAHA_API_BASE_URL', 'http://localhost:3030');
+    vi.stubEnv('WAHA_API_KEY', 'hash123');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ id: { _serialized: SERIALIZADO } }), { status: 200 })),
+    );
+    const { supabase, messages } = makeSupabase([ecoDoWebhook({ id: 'eco-webjs', external_id: CAUDA })]);
+
+    const msg = await sendMessageHandler(supabase, ctx, input);
+
+    expect(messages, 'a mesma frase ficou duas vezes na conversa').toHaveLength(1);
+    expect(msg.external_id, 'o envio gravou a string inteira e divergiu do eco').toBe(CAUDA);
+  });
+
+  it('chave tomada por linha que o delete NÃO alcança: fecha `sent` sem a chave', async () => {
+    // O delete é estreito de propósito (mesma conversa, só `external_device`).
+    // Quando a chave está com uma linha fora desse alcance, a saída certa NÃO é
+    // insistir nem falhar: é fechar `sent` sem `external_id`. Perde-se o ack
+    // desta linha; a alternativa era reenviar a mensagem ao cliente.
+    wahaRespondendo(BARE);
+    const deOutraConversa = ecoCanonico({ id: 'outra-conversa', conversation_id: OUTRA_CONV });
+    const { supabase, messages } = makeSupabase([deOutraConversa]);
+
+    const msg = await sendMessageHandler(supabase, ctx, input);
+
+    expect(msg.status, 'a mensagem saiu e a linha ficou presa').toBe('sent');
+    expect(msg.external_id, 'carimbou uma chave que é de outra linha').toBeNull();
+    expect(
+      messages.find((m) => m.id === 'outra-conversa'),
+      'apagou linha de outra conversa para poder carimbar',
+    ).toBeDefined();
+    expect(
+      (msg.metadata as Record<string, unknown> | null)?.external_id_tomado_pelo_eco,
+      'fechou sem a chave e sem dizer por quê',
+    ).toBe(BARE);
   });
 });

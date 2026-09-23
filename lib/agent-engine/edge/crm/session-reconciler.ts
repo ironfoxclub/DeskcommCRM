@@ -23,7 +23,7 @@
  */
 import type pg from 'pg';
 
-import { parseWahaMessageId } from '@/lib/waha/message-id';
+import { bareWaMessageId, parseWahaMessageId } from '@/lib/waha/message-id';
 
 import type { Logger } from '../../obs/logger';
 
@@ -179,6 +179,95 @@ function chatIdOf(m: QueuedRow): string | null {
   return null;
 }
 
+/**
+ * Fecha a linha que este resgate acabou de reenviar — e tira do caminho o ECO
+ * do próprio reenvio, se ele já tiver chegado.
+ *
+ * ⚠️ O DESFECHO QUE ESTA FUNÇÃO EXISTE PARA IMPEDIR é o pior do arquivo. A
+ * mensagem JÁ SAIU quando chegamos aqui. Se o carimbo falhar e a linha ficar
+ * `queued`, o próximo tique a reenvia — e o seguinte, e o seguinte. Medido com
+ * o eco já gravado na forma canônica, 3 tiques: 3 `sendText` ao cliente, linha
+ * ainda `queued`, três linhas de "erro transiente" no log. A doutrina do repo
+ * é explícita: envio em dobro é pior que não-envio.
+ *
+ * DELETE e UPDATE no MESMO comando, de propósito: os dois enxergam o mesmo
+ * instantâneo, então não existe janela entre "tirei o eco" e "carimbei a
+ * chave" — que é exatamente a janela pela qual o eco entra no caminho do
+ * `sendMessageHandler`. A `messages_org_external_id_unique` é `DEFERRABLE
+ * INITIALLY DEFERRED`, então a verificação acontece no COMMIT, quando a linha
+ * do eco já não existe.
+ *
+ * O escopo do delete é o mesmo de `removerEcoDoProprioEnvio` (app/api/v1/
+ * messages/_handler.ts) e pela mesma razão: só a MESMA conversa, só o que
+ * nasceu de `external_device`, nunca a própria linha. A cauda pode colidir
+ * entre mensagens diferentes (garantia do WhatsApp, não nossa); estreitar
+ * mantém o estrago de uma colisão no único lugar onde ela seria mesmo a nossa
+ * mensagem.
+ *
+ * O CINTO cobre qualquer falha do carimbo, não só o 23505 esperado (a chave pode
+ * estar com uma linha que este delete não alcança — outra conversa, ou uma linha
+ * nossa). A saída é sempre fechar em `sent` SEM a chave: perde-se o ack desta
+ * linha, nunca a mensagem, e nunca se reenvia.
+ */
+async function fecharRedrive(
+  pool: pg.Pool,
+  messageId: string,
+  externalId: string | null,
+  log: Logger,
+): Promise<void> {
+  let codigoDaFalha = 'sem_codigo';
+  try {
+    await pool.query(
+      `with nossa as (
+         -- O filtro de status vem AQUI, e não só no update: sem ele o DELETE do
+         -- eco rodaria mesmo com a linha já fechada por outro caminho, apagando
+         -- linha de webhook sem carimbar nada em troca.
+         select id, organization_id, conversation_id from messages
+          where id = $1 and status = 'queued'
+       ),
+       eco as (
+         delete from messages m
+         using nossa
+         where m.organization_id = nossa.organization_id
+           and m.conversation_id = nossa.conversation_id
+           and m.sent_via = 'external_device'
+           and m.external_id = $2
+           and m.id <> nossa.id
+         returning m.id
+       )
+       update messages m
+          set status = 'sent', ack = 0,
+              external_id = coalesce($2, m.external_id),
+              metadata = m.metadata || '{"redrive":"watchdog"}'::jsonb
+         from nossa
+        where m.id = nossa.id`,
+      [messageId, externalId],
+    );
+    return;
+  } catch (err) {
+    // QUALQUER erro cai aqui, não só o 23505 esperado — e a razão é o desfecho,
+    // não a elegância: a mensagem JÁ SAIU, então a única coisa que não pode
+    // acontecer é a linha continuar `queued`. Fechar sem a chave custa o ack
+    // desta linha; deixar `queued` custa uma segunda mensagem ao cliente a cada
+    // tique. Se o banco estiver mesmo fora, o `update` abaixo também levanta e o
+    // chamador registra como transiente — que é a verdade nesse caso.
+    codigoDaFalha = (err as { code?: string }).code ?? 'sem_codigo';
+  }
+
+  await pool.query(
+    `update messages
+        set status = 'sent', ack = 0,
+            metadata = metadata || '{"redrive":"watchdog","external_id_tomado_pelo_eco":true}'::jsonb
+      where id = $1 and status = 'queued'`,
+    [messageId],
+  );
+  log.warn('watchdog: não deu para carimbar a chave do envio — linha fechada sem external_id', {
+    message_id: messageId,
+    external_id: externalId,
+    sqlstate: codigoDaFalha,
+  });
+}
+
 /** Reenvia mensagens AI presas em queued com sessão WORKING. */
 export async function redriveQueued(
   pool: pg.Pool,
@@ -256,15 +345,14 @@ export async function redriveQueued(
         continue;
       }
       const data = (await res.json().catch(() => null)) as unknown;
-      const externalId = parseWahaMessageId(data);
-      await pool.query(
-        `update messages
-         set status = 'sent', ack = 0,
-             external_id = coalesce($2, external_id),
-             metadata = metadata || '{"redrive":"watchdog"}'::jsonb
-         where id = $1 and status = 'queued'`,
-        [m.id, externalId],
-      );
+      const bruto = parseWahaMessageId(data);
+      // A cauda, como as outras duas trilhas (ver `canonicalExternalId` em
+      // lib/channels/types.ts). Este worker é o TERCEIRO escritor da chave, e o
+      // que ninguém lembra: ele não passa pelo seam (é processo separado, `pg`
+      // cru), então normalizar só o envio e o webhook o deixaria gravando a
+      // forma antiga — e a linha do eco, agora canônica, nunca casaria.
+      const externalId = bruto === null ? null : bareWaMessageId(bruto);
+      await fecharRedrive(pool, m.id, externalId, log);
       sent += 1;
       log.info('watchdog: mensagem presa reenviada', { message_id: m.id, has_external_id: externalId !== null });
     } catch (err) {

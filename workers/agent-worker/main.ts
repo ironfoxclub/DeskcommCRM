@@ -235,6 +235,7 @@ export async function startWorker(
       intervalMs: env.CRM_DRAIN_INTERVAL_MS,
       idleIntervalMs: env.CRM_DRAIN_IDLE_INTERVAL_MS,
       debounceMs: env.INBOUND_DEBOUNCE_MS,
+      rajadaTetoMs: env.INBOUND_RAJADA_TETO_MS,
       reapTimeoutMs: env.CRM_EVENT_REAP_TIMEOUT_MS,
     },
     log,

@@ -3,7 +3,7 @@ import type pg from 'pg';
 
 import { drainTick } from './drain';
 
-const knobs = { batchSize: 10, intervalMs: 0, idleIntervalMs: 0, debounceMs: 0, reapTimeoutMs: 60000 };
+const knobs = { batchSize: 10, intervalMs: 0, idleIntervalMs: 0, debounceMs: 0, rajadaTetoMs: 45000, reapTimeoutMs: 60000 };
 const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
 const event = {
   id: 'e1', organization_id: 'org1', attempts: 1,

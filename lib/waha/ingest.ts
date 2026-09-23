@@ -504,6 +504,15 @@ async function handleInbound(
   if (!conversationId) return;
 
   const now = new Date().toISOString();
+  // A CAUDA, não o id como veio — ver `canonicalExternalId` em lib/channels/types.ts.
+  //
+  // No inbound o dedup já funcionava (as duas emissões do NOWEB, `message` e
+  // `message.any`, trazem o MESMO id composto), então esta linha não conserta
+  // nada aqui: ela existe para que a coluna signifique UMA coisa só no canal
+  // inteiro. Sem isso o backfill da 0167 teria de discriminar direção, e
+  // `handleMessageEdited`/`handleMessageRevoked` — que casam SÓ pela cauda —
+  // continuariam sem achar nenhuma mensagem recebida por NOWEB.
+  const idCanonico = bareWaMessageId(p.id);
   const { data: insertedMessage, error: insertErr } = await admin
     .from("messages")
     .insert({
@@ -511,7 +520,7 @@ async function handleInbound(
       conversation_id: conversationId,
       channel_session_id: session.id,
       contact_id: contactId,
-      external_id: p.id,
+      external_id: idCanonico,
       type: resolveMessageType(p),
       direction: "inbound",
       status: "delivered",
@@ -544,7 +553,7 @@ async function handleInbound(
     logger.info("waha.ingest: inbound ja ingerido, dedup por external_id", {
       organization_id: session.organization_id,
       conversation_id: conversationId,
-      external_id: p.id,
+      external_id: idCanonico,
       direcao: "inbound",
     });
     return;
@@ -557,7 +566,9 @@ async function handleInbound(
     organizationId: session.organization_id,
     resourceType: "message",
     requestId,
-    metadata: { conversation_id: conversationId, type: p.type, external_id: p.id },
+    // A chave CANÔNICA: é por ela que se acha a linha em `messages` depois. O id
+    // como o webhook o mandou não existe mais em lugar nenhum do banco.
+    metadata: { conversation_id: conversationId, type: p.type, external_id: idCanonico },
   });
 
   // ── OS EFEITOS DE NEGÓCIO, agora ATRÁS DO SEAM ──────────────────────────────
@@ -667,20 +678,32 @@ async function handleOutboundFromUserPhone(
   // ECO DO PRÓPRIO ENVIO — não duplicar.
   //
   // Toda mensagem que o CRM manda (composer ou IA) volta pelo webhook como
-  // `fromMe=true`. O dedup por `external_id` NÃO pega esse caso, porque os dois
-  // lados gravam formas diferentes do mesmo id: o envio grava o id "bare"
-  // (`3EB0…`) e o webhook chega com o composto (`true_<chat>_3EB0…`). São
-  // strings distintas, então o unique não dispara e nasce uma segunda linha —
-  // a mesma frase aparecendo duas vezes na conversa.
+  // `fromMe=true`. Até a issue #196 o dedup por `external_id` NÃO pegava esse
+  // caso, porque os dois lados gravavam formas diferentes do mesmo id: o envio
+  // gravava o id "bare" (`3EB0…`) e o webhook chegava com o composto
+  // (`true_<chat>_3EB0…`). Strings distintas, unique não dispara, nasce uma
+  // segunda linha — a mesma frase duas vezes na conversa.
   //
   // Antes isto não aparecia por acidente: sem `to`, esta função voltava cedo e
   // o eco era descartado junto com as mensagens legítimas do celular. Ao
   // consertar aquele caminho, a duplicação ficou exposta.
   //
-  // Mesmo par de candidatos que o `handleAck` usa — cobre NOWEB (bare) e WEBJS
-  // (full) sem depender do engine.
-  const bare = bareWaMessageId(p.id);
-  const idCandidates = bare === p.id ? [p.id] : [p.id, bare];
+  // ⚠️ ESTA CONSULTA É ATALHO, NÃO GARANTIA — e a diferença é a issue #196.
+  //
+  // Entre o `select` e o `insert` cabem dois RPCs (contato e conversa), e nessa
+  // janela o envio pelo CRM carimba a chave: o check-then-act perde a corrida e
+  // a linha nasce mesmo assim. Quem FECHA a fresta é o `23505` do insert lá
+  // embaixo, e ele só dispara porque as duas trilhas agora gravam a MESMA
+  // string (`bareWaMessageId`, ver `canonicalExternalId` em lib/channels/types).
+  // Antes, o envio gravava a cauda e o eco o composto — o unique comparava
+  // strings diferentes e nunca disparava.
+  //
+  // O atalho fica porque poupa dois RPCs e um insert no caso comum (o eco chega
+  // depois do envio já carimbado, que é a maioria), e porque casa também as
+  // formas ANTIGAS: linha gravada por uma imagem anterior a esta, durante o
+  // intervalo de um deploy, ainda tem o composto.
+  const idCanonico = bareWaMessageId(p.id);
+  const idCandidates = idCanonico === p.id ? [p.id] : [p.id, idCanonico];
   const { data: jaRegistrada } = await admin
     .from("messages")
     .select("id")
@@ -719,7 +742,7 @@ async function handleOutboundFromUserPhone(
       conversation_id: conversationId,
       channel_session_id: session.id,
       contact_id: contactId,
-      external_id: p.id,
+      external_id: idCanonico,
       type: resolveMessageType(p),
       direction: "outbound",
       status: "sent",
@@ -741,7 +764,7 @@ async function handleOutboundFromUserPhone(
     // Mesma razão do inbound: dedup é esperado, invisível não.
     logger.info("waha.ingest: outbound ja ingerido, dedup por external_id", {
       organization_id: session.organization_id,
-      external_id: p.id,
+      external_id: idCanonico,
       direcao: "outbound",
     });
     return;
@@ -754,7 +777,7 @@ async function handleOutboundFromUserPhone(
     organizationId: session.organization_id,
     resourceType: "message",
     requestId,
-    metadata: { conversation_id: conversationId, type: p.type, external_id: p.id, from_user_phone: true },
+    metadata: { conversation_id: conversationId, type: p.type, external_id: idCanonico, from_user_phone: true },
   });
 
   if (insertedOutbound?.id && mediaUrlOf(p)) {

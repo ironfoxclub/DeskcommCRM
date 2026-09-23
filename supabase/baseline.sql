@@ -13573,3 +13573,127 @@ create index if not exists webhook_events_log_a_esvaziar_idx
 
 notify pgrst, 'reload schema';
 
+
+-- ---- identidade canônica da mensagem do WhatsApp (migration 0167) ----
+--
+-- `messages.external_id` das linhas do canal WhatsApp (`channel_sessions.provider
+-- = 'waha'`) passa a guardar SEMPRE a CAUDA do id — o trecho depois do último
+-- `_`. É a mesma regra que `bareWaMessageId` já aplicava na LEITURA e que agora
+-- vale na ESCRITA, nas três trilhas que gravam a chave: o envio pelo CRM, o eco
+-- do próprio envio voltando pelo webhook e o resgate do watchdog.
+--
+-- POR QUÊ: `messages_org_external_id_unique` compara STRING, e com o engine NOWEB
+-- (o padrão do kit) as trilhas gravavam formas diferentes do MESMO id — o envio a
+-- cauda (`2A1B…`), o webhook o composto (`true_250302204792918@lid_2A1B…`). O
+-- 23505 nunca disparava e a mesma frase virava duas linhas na conversa (issue
+-- #196, visto numa instalação real).
+--
+-- SÓ `provider = 'waha'`: o `wamid.…` da Meta é base64url e CONTÉM `_` —
+-- normalizar a coluna inteira truncaria o id do canal oficial. E nenhum CHECK
+-- novo, pelo mesmo motivo: a coluna é compartilhada entre canais.
+--
+-- BACKFILL, e a escolha declarada — MESCLAR e MARCAR; apagar só a cópia que este
+-- defeito criou. Normalizar sem mais nada violaria o unique nas conversas que já
+-- duplicaram. Deduplicar `messages` é apagar histórico de cliente, então o
+-- critério é estreito: sai apenas o eco do NOSSO envio (mesma conversa, mesmo
+-- corpo, mesma cauda, ±10 min, `external_device` contra uma linha `ai`/`user` da
+-- mesma mensagem) — segunda cópia de uma linha que o CRM já tem, com
+-- estritamente menos informação. Qualquer outra colisão mantém a LINHA e perde só
+-- a chave, com o valor antigo gravado em `metadata.external_id_nao_canonico`.
+--
+-- Idempotente: re-aplicar não acha par nenhum (os ecos já saíram), não acha
+-- colisão (as chaves já são únicas) e a normalização já é ponto fixo — cortar no
+-- último `_` de uma cauda devolve a própria cauda.
+
+-- (1) o que o eco tiver a mais vai para a linha que fica, ANTES de ele sair.
+update public.messages ganhadora
+   set media_storage_path = eco.media_storage_path,
+       media_size_bytes   = coalesce(ganhadora.media_size_bytes, eco.media_size_bytes)
+  from public.messages eco
+  join public.channel_sessions s on s.id = eco.channel_session_id
+ where s.provider = 'waha'
+   and eco.sent_via = 'external_device'
+   and eco.direction = 'outbound'
+   and eco.external_id is not null
+   and eco.media_storage_path is not null
+   and ganhadora.media_storage_path is null
+   and ganhadora.id <> eco.id
+   and ganhadora.organization_id = eco.organization_id
+   and ganhadora.conversation_id = eco.conversation_id
+   and ganhadora.direction = 'outbound'
+   and ganhadora.sent_via in ('ai', 'user')
+   and ganhadora.external_id is not null
+   and nullif(substring(ganhadora.external_id from '[^_]*$'), '')
+       = nullif(substring(eco.external_id from '[^_]*$'), '')
+   and ganhadora.body is not distinct from eco.body
+   and abs(extract(epoch from (ganhadora.sent_at - eco.sent_at))) < 600;
+
+-- (2) a cópia que este defeito criou sai.
+delete from public.messages eco
+ using public.messages ganhadora, public.channel_sessions s
+ where s.id = eco.channel_session_id
+   and s.provider = 'waha'
+   and eco.sent_via = 'external_device'
+   and eco.direction = 'outbound'
+   and eco.external_id is not null
+   and ganhadora.id <> eco.id
+   and ganhadora.organization_id = eco.organization_id
+   and ganhadora.conversation_id = eco.conversation_id
+   and ganhadora.direction = 'outbound'
+   and ganhadora.sent_via in ('ai', 'user')
+   and ganhadora.external_id is not null
+   and nullif(substring(ganhadora.external_id from '[^_]*$'), '')
+       = nullif(substring(eco.external_id from '[^_]*$'), '')
+   and ganhadora.body is not distinct from eco.body
+   and abs(extract(epoch from (ganhadora.sent_at - eco.sent_at))) < 600;
+
+-- (3) o que ainda colidiria perde a CHAVE, nunca a linha. O ranking inclui as
+-- linhas de outros canais (a chave delas não se mexe, então vencem o empate):
+-- sem isso uma colisão entre canais faria o passo (4) estourar o unique, e o
+-- `update.sh` roda SEM `ON_ERROR_STOP` — a falha passaria em verde e o clone
+-- ficaria com metade da normalização aplicada.
+with alvo as (
+  select m.id,
+         m.organization_id,
+         m.sent_via,
+         m.created_at,
+         (s.provider = 'waha') as eh_waha,
+         case when s.provider = 'waha'
+              then nullif(substring(m.external_id from '[^_]*$'), '')
+              else m.external_id
+         end as chave_alvo
+    from public.messages m
+    join public.channel_sessions s on s.id = m.channel_session_id
+   where m.external_id is not null
+),
+ranqueado as (
+  select id,
+         row_number() over (
+           partition by organization_id, chave_alvo
+           order by eh_waha, (sent_via = 'external_device'), created_at, id
+         ) as posicao
+    from alvo
+   where chave_alvo is not null
+),
+perdedoras as (select id from ranqueado where posicao > 1)
+update public.messages m
+   set external_id = null,
+       metadata = coalesce(m.metadata, '{}'::jsonb)
+                  || jsonb_build_object('external_id_nao_canonico', m.external_id)
+  from perdedoras p
+ where m.id = p.id;
+
+-- (4) e só agora a normalização, que já não pode colidir com nada.
+update public.messages m
+   set external_id = nullif(substring(m.external_id from '[^_]*$'), '')
+  from public.channel_sessions s
+ where s.id = m.channel_session_id
+   and s.provider = 'waha'
+   and m.external_id is not null
+   and strpos(m.external_id, '_') > 0
+   and nullif(substring(m.external_id from '[^_]*$'), '') is not null;
+
+comment on column public.messages.external_id is
+  'Id da mensagem no canal. WhatsApp/WAHA: SEMPRE a cauda (o trecho após o último "_") — as três trilhas de escrita normalizam por canonicalExternalId (lib/channels/types.ts); sem isso o unique (organization_id, external_id) não pega o eco do próprio envio. Outros canais gravam o id como o provedor o manda.';
+
+notify pgrst, 'reload schema';

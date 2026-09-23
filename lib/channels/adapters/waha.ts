@@ -37,6 +37,25 @@ export const wahaAdapter: ChannelAdapter = {
     return [...new Set([input.externalId, bare, `true_${input.recipient}_${bare}`])];
   },
 
+  /**
+   * A cauda. As duas trilhas de escrita passam por aqui, então o `unique
+   * (organization_id, external_id)` volta a ser a rede que ele promete ser.
+   *
+   * Cobre os dois engines, e é preciso cobrir os dois: no NOWEB o envio devolve
+   * o bare e o webhook manda o composto (as chaves divergem, e é o defeito da
+   * issue #196); no WEBJS os dois lados já mandam o `_serialized` completo, e
+   * normalizar só um dos lados QUEBRARIA o que hoje funciona ali. Reduzir os
+   * dois à cauda mantém o WEBJS igual (a cauda do `_serialized` é a mesma dos
+   * dois lados) e faz o NOWEB convergir.
+   *
+   * Um id já-bare passa intacto (`bareWaMessageId` só corta no último `_`), o
+   * que torna esta função idempotente — importante porque o backfill da
+   * migration 0167 a reproduz em SQL sobre as linhas que já existem.
+   */
+  canonicalExternalId(externalId: string): string {
+    return bareWaMessageId(externalId);
+  },
+
   // Mesmo pre-check que o handler já fazia com `getWahaClient() !== null`,
   // movido para trás do seam. `getWahaClient` lê o env a cada chamada (não
   // memoiza), então o estado aqui é sempre o corrente.

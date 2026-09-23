@@ -59,8 +59,9 @@ const envSchema = z.object({
   // transação de claim inteira — 5 statements, ~17/s para sempre numa instalação
   // que não atende ninguém (issue #258: 8,09 GB/mês de egress medidos contra uma
   // cota de 5 GB do plano free do Supabase). O 2000 mantém o SIGNIFICADO da chave
-  // para quem já a configurou, cabe 4× dentro do INBOUND_DEBOUNCE_MS (8000) e fica
-  // abaixo do idleTimeoutMillis do pool (10s), acima do qual cada rodada reconecta.
+  // para quem já a configurou, cabe várias vezes dentro do INBOUND_DEBOUNCE_MS
+  // (que a issue #196 subiu para 20000) e fica abaixo do idleTimeoutMillis do
+  // pool (10s), acima do qual cada rodada reconecta.
   QUEUE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2_000),
   // Ritmo do "havia trabalho e eu não peguei" — cap QUEUE_MAX_CONCURRENCY cheio ou
   // lane do contato ocupada. Aqui há job vencido esperando vaga, então recolher o
@@ -109,9 +110,30 @@ const envSchema = z.object({
   CRM_DRAIN_IDLE_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
   // Evento 'processing' órfão (crash do worker) volta a 'pending' após isto.
   CRM_EVENT_REAP_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
-  // Coalescência de rajada inbound: mensagens do MESMO contato dentro desta
-  // janela viram UM job (responder em rajada é gatilho de ban). 0 = sem debounce.
-  INBOUND_DEBOUNCE_MS: z.coerce.number().int().min(0).default(8_000),
+  // ── JANELA DE SILÊNCIO do contato (coalescência de rajada inbound) ──────────
+  //
+  // O turno só é despachado depois de o contato passar esta janela sem escrever,
+  // e cada mensagem nova ADIA o despacho (o drain faz a janela deslizar). O que
+  // ela compra: uma resposta para a rajada inteira, em vez de uma resposta por
+  // linha digitada — que é o que faz o cliente receber três mensagens seguidas
+  // sobre o mesmo assunto, e é gatilho de banimento. 0 = sem debounce.
+  //
+  // ⚠️ O DEFAULT SUBIU DE 8 s PARA 20 s, e o número é o que decide se a promessa
+  // acima vale. Medido numa instalação real (issue #196): as pausas do cliente
+  // entre uma mensagem e a seguinte foram de 12,1 s e 17,5 s. Com 8 s a janela
+  // vencia ANTES de a pessoa terminar de escrever, e nenhum desenho de
+  // coalescência conserta isso — a janela de silêncio precisa ser maior que a
+  // pausa de quem digita. Medido no cenário exato da issue, com a janela
+  // deslizante já em vigor: 8 s → 2 respostas; 20 s → 1 resposta.
+  //
+  // O custo é honesto: quem manda UMA mensagem e para espera ~12 s a mais pela
+  // resposta. Precedente do próprio produto — o drain já segura um turno de
+  // áudio por até 45 s esperando a transcrição.
+  INBOUND_DEBOUNCE_MS: z.coerce.number().int().min(0).default(20_000),
+  // Teto da espera acima, contado desde a PRIMEIRA mensagem da rajada. Sem ele,
+  // um contato que não para de escrever adia a resposta para sempre. 45 s é o
+  // mesmo teto que o drain já usa para esperar a transcrição de um áudio.
+  INBOUND_RAJADA_TETO_MS: z.coerce.number().int().positive().default(45_000),
   // Circuito de saúde do número — ritmo do ticker (block/response rate por número).
   NUMBER_HEALTH_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
   // Cron persistente por contato — knobs, nunca constantes.

@@ -7,8 +7,10 @@
  *   - organization_id vem da LINHA do evento (fonte confiável), nunca do payload;
  *   - at-least-once + dedup: claim CAS (pending→processing) + unique
  *     (organization_id, source_event_id) em job_queue com captura de 23505;
- *   - coalescência de rajada: mensagens do MESMO contato dentro da janela de
- *     debounce viram UM job (o turno lê o histórico completo e responde a todas);
+ *   - coalescência de rajada com JANELA DESLIZANTE: enquanto o turno do contato
+ *     não começou, a mensagem nova entra de carona nele e ADIA o despacho para
+ *     "agora + janela de silêncio", com teto desde a primeira mensagem da
+ *     rajada (o turno lê o histórico completo e responde a todas de uma vez);
  *   - grupos @g.us: skip (regra dura nº 12) — evento marcado done sem job;
  *   - eventos 'processing' órfãos (crash do worker) voltam a 'pending' por timeout.
  */
@@ -42,8 +44,17 @@ export interface DrainKnobs {
   batchSize: number;
   intervalMs: number;
   idleIntervalMs: number;
-  /** Janela de coalescência de rajada inbound por contato (0 = sem debounce). */
+  /**
+   * Janela de SILÊNCIO do contato. O turno só é despachado depois de o contato
+   * passar este tempo sem escrever — e cada mensagem nova ADIA o despacho
+   * (janela deslizante). 0 = sem debounce.
+   */
   debounceMs: number;
+  /**
+   * Teto da espera, contado desde a PRIMEIRA mensagem da rajada. Sem ele, um
+   * contato que não para de escrever adia a resposta para sempre.
+   */
+  rajadaTetoMs: number;
   /** Evento 'processing' órfão volta a 'pending' após isto. */
   reapTimeoutMs: number;
 }
@@ -247,20 +258,54 @@ async function processEvent(
     });
   }
 
-  // Coalescência: já existe job PENDING futuro deste contato → esta mensagem
-  // entra de carona (o turno lê o histórico completo). Evento vira done.
+  // ── COALESCÊNCIA DE RAJADA: a janela DESLIZA ───────────────────────────────
+  //
+  // Enquanto o job não COMEÇOU, ele ainda vai ler o histórico inteiro — então
+  // toda mensagem nova do mesmo contato entra de carona nele, e o prazo dele
+  // recua para "agora + janela de silêncio". O evento vira done sem job novo.
+  //
+  // DUAS COISAS MUDARAM AQUI, e cada uma sozinha era insuficiente (issue #196):
+  //
+  //  1. A carona valia só para job com `run_after > now()`. Um job que já
+  //     venceu mas ainda não rodou — porque o claim serializa por contato e
+  //     havia OUTRO turno em voo — não recebia carona nenhuma, e cada mensagem
+  //     da rajada virava um job. Foi assim que 3 mensagens em ~30 s viraram 3
+  //     jobs e 3 respostas sobre o mesmo assunto. `status = 'pending'` é a
+  //     pergunta certa: "este turno já começou?".
+  //  2. O prazo era fixado UMA vez, no nascimento (`created_at + debounce`), e
+  //     nada o estendia. Isso não é debounce, é temporizador: a segunda
+  //     mensagem entrava de carona mas não comprava tempo, e a janela vencia no
+  //     meio da rajada. Agora o prazo desliza — com TETO desde a primeira
+  //     mensagem, senão quem não para de escrever nunca é respondido.
+  //
+  // ⚠️ O `and status = 'pending'` no UPDATE (além do subselect) é o que impede o
+  // pior desfecho possível: sob READ COMMITTED o Postgres reavalia o WHERE
+  // depois de travar a linha, então um job que virou 'running' entre o subselect
+  // e o lock deixa de casar — `rows` volta vazio e a mensagem ganha job próprio.
+  // Sem essa cláusula, adiaríamos um turno que JÁ LEU o histórico sem ela e a
+  // mensagem ficaria sem resposta.
   if (knobs.debounceMs > 0) {
-    const { rows: pendingRows } = await pool.query<{ id: string }>(
-      `select id from job_queue
-       where organization_id = $1 and contact_id = $2
-         and kind = 'inbound_turn' and status = 'pending' and run_after > now()
-       limit 1`,
-      [event.organization_id, p.contact_id],
+    const { rows: coalescido } = await pool.query<{ id: string }>(
+      `update job_queue j
+          set run_after = least(
+                now() + make_interval(secs => $3 / 1000.0),
+                j.created_at + make_interval(secs => $4 / 1000.0)
+              )
+        where j.id = (
+                select id from job_queue
+                 where organization_id = $1 and contact_id = $2
+                   and kind = 'inbound_turn' and status = 'pending'
+                 order by run_after
+                 limit 1
+              )
+          and j.status = 'pending'
+       returning j.id`,
+      [event.organization_id, p.contact_id, knobs.debounceMs, knobs.rajadaTetoMs],
     );
-    if (pendingRows[0]) {
+    if (coalescido[0]) {
       log.info('drain: rajada coalescida em job pendente', {
         event_id: event.id,
-        job_id: pendingRows[0].id,
+        job_id: coalescido[0].id,
       });
       return 'processado';
     }

@@ -104,6 +104,126 @@ async function removerEcoDoProprioEnvio(
   }
 }
 
+/**
+ * A chave `(organization_id, external_id)` já pertence a OUTRA linha.
+ *
+ * Duas formas de reconhecer o mesmo desfecho, e as duas são necessárias:
+ *
+ *  - `23505` é o SQLSTATE, o que o PostgREST devolve no campo `code` quando a
+ *    violação acontece no próprio `UPDATE`;
+ *  - o nome da constraint no texto cobre a variante DEFERIDA, que é a que este
+ *    banco usa: `messages_org_external_id_unique` é `DEFERRABLE INITIALLY
+ *    DEFERRED` (baseline.sql), então o `UPDATE` volta `00000` e a violação só
+ *    estoura no `COMMIT` da transação que o PostgREST abre por requisição. Um
+ *    erro de commit não é obrigado a chegar com o mesmo envelope de um erro de
+ *    statement, e depender só do `code` deixaria a linha `queued` com a
+ *    mensagem JÁ ENTREGUE — que é o pior desfecho possível aqui, porque o
+ *    watchdog reenviaria.
+ */
+function ehChaveJaTomada(erro: { code?: string | null; message?: string | null } | null): boolean {
+  if (!erro) return false;
+  if (erro.code === "23505") return true;
+  return (erro.message ?? "").includes("messages_org_external_id_unique");
+}
+
+/**
+ * O carimbo do envio quando o ECO ganhou a corrida pela chave canônica.
+ *
+ * A janela: `removerEcoDoProprioEnvio` roda ANTES do `UPDATE`, e entre os dois
+ * cabe o webhook. Quando o eco entra aí, a chave que este envio ia gravar já
+ * está tomada pela linha dele.
+ *
+ * Duas tentativas, nesta ordem, e o motivo da ordem é qual linha o operador vê:
+ *
+ *  1. remover o eco DE NOVO e carimbar — o desfecho certo. A linha que fica é a
+ *     do envio, com `sent_via` e `sent_by_user_id`; a do webhook não tem autoria
+ *     nenhuma, e ficar com ela apagaria quem falou.
+ *  2. se a chave continuar tomada (por linha que não é eco removível — outra
+ *     conversa, ou uma linha nossa), fechar em `sent` SEM a chave.
+ *
+ * ⚠️ O QUE NÃO PODE ACONTECER, e é o que acontecia antes: sair daqui com a
+ * linha em `queued`. A mensagem JÁ FOI ENTREGUE ao cliente quando chegamos
+ * aqui; `queued` faz o watchdog (`redriveQueued`) reenviar a cada tique, e a
+ * doutrina do repo é explícita — envio em dobro é pior que não-envio. Ficar sem
+ * `external_id` custa o ack desta linha (o status para em `sent`); é o preço, e
+ * ele é pago no lugar certo.
+ */
+async function fecharEnvioQueOEcoCarimbou(
+  supabase: SB,
+  args: {
+    organizationId: string;
+    conversationId: string;
+    message: Message;
+    idCanonico: string | null;
+    candidatosDoEco: string[];
+    colunasDeTemplate: Record<string, unknown>;
+  },
+): Promise<Message> {
+  // BLINDADO pela mesma razão de `removerEcoDoProprioEnvio`: rodamos dentro do
+  // `try` do envio, com a mensagem já entregue. Uma exceção daqui faria o
+  // `catch` de baixo marcar `failed` uma mensagem que o cliente recebeu —
+  // trocar um status incompleto por um status MENTIROSO.
+  try {
+    return await tentarFecharEnvio(supabase, args);
+  } catch (err) {
+    console.error(
+      "[messages.send] o fechamento após o eco lançou",
+      err instanceof Error ? err.message : err,
+    );
+    return args.message;
+  }
+}
+
+async function tentarFecharEnvio(
+  supabase: SB,
+  args: {
+    organizationId: string;
+    conversationId: string;
+    message: Message;
+    idCanonico: string | null;
+    candidatosDoEco: string[];
+    colunasDeTemplate: Record<string, unknown>;
+  },
+): Promise<Message> {
+  await removerEcoDoProprioEnvio(
+    supabase,
+    args.organizationId,
+    args.conversationId,
+    args.message.id,
+    args.idCanonico,
+    args.candidatosDoEco,
+  );
+  const { data: segunda } = await supabase
+    .from("messages")
+    .update({
+      status: "sent",
+      external_id: args.idCanonico,
+      ack: 0,
+      ...args.colunasDeTemplate,
+    })
+    .eq("id", args.message.id)
+    .select(MSG_COLS)
+    .maybeSingle();
+  if (segunda) return segunda as unknown as Message;
+
+  const { data: semChave } = await supabase
+    .from("messages")
+    .update({
+      status: "sent",
+      ack: 0,
+      metadata: { ...(args.message.metadata ?? {}), external_id_tomado_pelo_eco: args.idCanonico },
+      ...args.colunasDeTemplate,
+    })
+    .eq("id", args.message.id)
+    .select(MSG_COLS)
+    .maybeSingle();
+  console.error("[messages.send] o eco tomou a chave do envio; linha fechada sem external_id", {
+    message_id: args.message.id,
+    external_id: args.idCanonico,
+  });
+  return (semChave as unknown as Message) ?? args.message;
+}
+
 const MSG_COLS =
   "id, organization_id, conversation_id, channel_session_id, contact_id, external_id, type, direction, status, ack, error_code, error_message, body, media_url, media_mime, media_size_bytes, media_storage_path, sent_via, sent_by_user_id, sent_at, delivered_at, read_at, metadata, edited_at, revoked_at, created_at";
 
@@ -511,30 +631,57 @@ export async function sendMessageHandler(
           body: input.body ?? "",
         }));
       }
+      // A CHAVE QUE VAI PARA O BANCO É A CANÔNICA DO CANAL, não a que o
+      // transporte devolveu. É o que faz a `unique (organization_id,
+      // external_id)` valer contra o eco deste mesmo envio, que chega pelo
+      // webhook com outra forma do MESMO id (issue #196; ver
+      // `canonicalExternalId` em lib/channels/types.ts). Canal simétrico não
+      // implementa o método e nada muda para ele.
+      const idCanonico = externalId ? (adapter.canonicalExternalId?.(externalId) ?? externalId) : null;
+      const candidatosDoEco = externalId
+        ? (adapter.echoExternalIds?.({ externalId, recipient: chatId }) ?? [externalId])
+        : [];
+      const colunasDeTemplate =
+        input.type === "template"
+          ? // Colunas só do template — é o que responde custo e conformidade de
+            // janela depois, sem varrer jsonb.
+            { template_name: input.template_name, template_language: input.template_language }
+          : {};
+
       await removerEcoDoProprioEnvio(
         supabase,
         ctx.organization_id,
         c.id,
         message.id,
-        externalId,
-        externalId ? (adapter.echoExternalIds?.({ externalId, recipient: chatId }) ?? [externalId]) : [],
+        idCanonico,
+        candidatosDoEco,
       );
-      const { data: updated } = await supabase
+      const { data: updated, error: erroDoCarimbo } = await supabase
         .from("messages")
-        .update({
-          status: "sent",
-          external_id: externalId,
-          ack: 0,
-          // Colunas só do template — é o que responde custo e conformidade de
-          // janela depois, sem varrer jsonb.
-          ...(input.type === "template"
-            ? { template_name: input.template_name, template_language: input.template_language }
-            : {}),
-        })
+        .update({ status: "sent", external_id: idCanonico, ack: 0, ...colunasDeTemplate })
         .eq("id", message.id)
         .select(MSG_COLS)
         .maybeSingle();
-      if (updated) message = updated as unknown as Message;
+      if (updated) {
+        message = updated as unknown as Message;
+      } else if (ehChaveJaTomada(erroDoCarimbo)) {
+        message = await fecharEnvioQueOEcoCarimbou(supabase, {
+          organizationId: ctx.organization_id,
+          conversationId: c.id,
+          message,
+          idCanonico,
+          candidatosDoEco,
+          colunasDeTemplate,
+        });
+      } else if (erroDoCarimbo) {
+        // Nem carimbou nem é conflito de chave: a mensagem SAIU e a linha ficou
+        // como estava. Sair calado daqui é o que fez a issue #196 demorar a ser
+        // vista — o status mentia e nada contava.
+        console.error("[messages.send] o carimbo do envio falhou", {
+          message_id: message.id,
+          erro: erroDoCarimbo.message,
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : adapter.codes.unknownError;
       // `storage_sign_failed` fica literal: é falha do NOSSO Storage, não do

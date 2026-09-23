@@ -40,6 +40,7 @@ const DRAIN_KNOBS = {
   intervalMs: 100,
   idleIntervalMs: 100,
   debounceMs: 0, // sem debounce: o job nasce imediatamente drenável no teste
+  rajadaTetoMs: 45_000,
   reapTimeoutMs: 300_000,
 };
 

@@ -433,6 +433,14 @@ create table public.messages (
   contact_id          uuid not null references public.contacts(id) on delete restrict,
 
   -- Identidade WAHA
+  -- SEMPRE a CAUDA do id (o trecho após o último "_"), gravada assim pelas três
+  -- trilhas de escrita — envio pelo CRM, eco do envio pelo webhook e redrive do
+  -- watchdog (issue #196, migration 0167). O NOWEB é assimétrico: o envio
+  -- devolve `2A1B…` e o webhook manda `true_<chat>_2A1B…`; enquanto cada lado
+  -- gravava a sua forma, o unique abaixo comparava strings diferentes e a mesma
+  -- mensagem virava duas linhas. Quem normaliza é `canonicalExternalId` do
+  -- adapter do canal (lib/channels/types.ts) — canal cujo id é simétrico (o
+  -- `wamid.` da Meta, que CONTÉM "_") não implementa o método e grava como veio.
   external_id         text,    -- nullable: outbound em sending ainda não tem ID
   type                text not null
                       check (type in (
