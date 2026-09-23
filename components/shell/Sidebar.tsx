@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useT } from "@/hooks/i18n/useT";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { ArrowRight, CaretDoubleLeft, CaretDoubleRight, CaretDown, Gear } from "@/lib/ui/icons";
+import { ArrowRight, ArrowSquareOut, CaretDoubleLeft, CaretDoubleRight, CaretDown, Gear } from "@/lib/ui/icons";
 import { cn } from "@/lib/utils";
 import { toggleSidebar } from "@/app/actions/shell/toggleSidebar";
 import { useAuth } from "@/hooks/auth/AuthProvider";
@@ -15,6 +15,11 @@ import { useMarcaDaInstalacao } from "@/lib/branding/contexto";
 import { GRUPO_NO_RODAPE, sidebarGroups } from "@/lib/navigation/registry";
 
 const CHAVE_GRUPOS_FECHADOS = "sidebar-grupos-fechados";
+
+// Fork IronFox: atalho de volta pro VulcanOS (o hub da agência). Fixo aqui, e não
+// numa NEXT_PUBLIC_*, porque a imagem Docker queima essas no build com placeholder
+// (ver app/public-env-script.tsx).
+const URL_DO_VULCANOS = "https://vulcanos-app.vercel.app";
 
 interface SidebarContentProps {
   collapsed: boolean;
@@ -310,6 +315,19 @@ export function SidebarContent({
         })}
       </nav>
       <div className="border-t p-2">
+        <a
+          href={URL_DO_VULCANOS}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={collapsed ? "VulcanOS" : undefined}
+          className={cn(
+            "mb-1 flex items-center gap-3 rounded-md px-3 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground",
+            collapsed && "justify-center px-2",
+          )}
+        >
+          <ArrowSquareOut size={18} aria-hidden />
+          {!collapsed && <span className="truncate">VulcanOS</span>}
+        </a>
         {rodape && (
           <Link
             href={rodape.href}
