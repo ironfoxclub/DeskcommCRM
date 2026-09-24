@@ -11,7 +11,9 @@ original (`melgarafael/DeskcommCRM`) com o **visual do VulcanOS no modo escuro**
 | `app/tema-vulcanos.css` | Todo o visual: degradê vinho, granulado, placa de vidro, sidebar, pop-ups, botões |
 | `app/layout.tsx` | Importa o CSS acima |
 | `app/app/_components/AppShell.tsx` | Atributos `data-casca` (raiz, coluna, conteúdo) |
-| `components/shell/Sidebar.tsx` | Atributo `data-casca="sidebar"` |
+| `components/shell/Sidebar.tsx` | Atributo `data-casca="sidebar"`; atalho do VulcanOS só para admin da plataforma |
+| `lib/ironfox/vulcanos.ts`, `app/auth/vulcanos/route.ts`, `app/api/ironfox/vulcanos/route.ts` | Login central com o VulcanOS (só a equipe IronFox) |
+| `app/(public)/login/page.tsx` | Manda ao login central só o navegador que já entrou pelo VulcanOS; clientes veem o login do CRM |
 | `components/shell/TopBar.tsx` | Atributo `data-casca="topo"` |
 | `components/inbox/InboxLayout.tsx` | Altura da caixa de entrada desconta `--casca-respiro` |
 

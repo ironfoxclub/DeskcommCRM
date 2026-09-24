@@ -325,19 +325,22 @@ export function SidebarContent({
         })}
       </nav>
       <div className="border-t p-2">
-        <a
-          href={ATALHO_DO_VULCANOS}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={collapsed ? "VulcanOS" : undefined}
-          className={cn(
-            "mb-1 flex items-center gap-3 rounded-md px-3 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground",
-            collapsed && "justify-center px-2",
-          )}
-        >
-          <SimboloDoVulcanOS className="size-[18px] shrink-0" />
-          {!collapsed && <span className="truncate">VulcanOS</span>}
-        </a>
+        {/* Só a equipe IronFox (admin da plataforma) vê o atalho; clientes não. */}
+        {user.is_platform_admin && (
+          <a
+            href={ATALHO_DO_VULCANOS}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={collapsed ? "VulcanOS" : undefined}
+            className={cn(
+              "mb-1 flex items-center gap-3 rounded-md px-3 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground",
+              collapsed && "justify-center px-2",
+            )}
+          >
+            <SimboloDoVulcanOS className="size-[18px] shrink-0" />
+            {!collapsed && <span className="truncate">VulcanOS</span>}
+          </a>
+        )}
         {rodape && (
           <Link
             href={rodape.href}

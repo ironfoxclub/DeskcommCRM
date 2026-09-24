@@ -8,7 +8,11 @@ import { branding } from "@/lib/branding";
 import { createClient } from "@/lib/supabase/server";
 import { idiomaDoVisitante } from "@/lib/i18n/idiomaAnonimo";
 import { traduzir } from "@/lib/i18n/dicionario";
-import { COOKIE_TENTATIVA_LOGIN_CENTRAL, urlDoLoginCentral } from "@/lib/ironfox/vulcanos";
+import {
+  COOKIE_EQUIPE_IRONFOX,
+  COOKIE_TENTATIVA_LOGIN_CENTRAL,
+  urlDoLoginCentral,
+} from "@/lib/ironfox/vulcanos";
 
 export const metadata = { title: "Entrar" };
 
@@ -19,11 +23,14 @@ export default async function LoginPage({
 }) {
   const { next, reset, error, local } = await searchParams;
   // Fork IronFox — login central: a senha é pedida no VulcanOS, que devolve a
-  // pessoa logada aqui (ver lib/ironfox/vulcanos.ts). Fica nesta tela quando há
-  // aviso a mostrar (`error`, `reset`), quando alguém pede a tela daqui
-  // (`?local=1`) ou quando o login central acabou de falhar (cookie de tentativa).
-  const tentouAgora = (await cookies()).has(COOKIE_TENTATIVA_LOGIN_CENTRAL);
-  if (!error && !reset && !local && !tentouAgora) {
+  // pessoa logada aqui (ver lib/ironfox/vulcanos.ts). Só vale para o navegador de
+  // quem já entrou pelo VulcanOS (cookie da equipe); clientes ficam nesta tela.
+  // Também fica aqui quando há aviso a mostrar (`error`, `reset`), quando alguém
+  // pede a tela daqui (`?local=1`) ou quando o login central acabou de falhar.
+  const jar = await cookies();
+  const daEquipe = jar.has(COOKIE_EQUIPE_IRONFOX);
+  const tentouAgora = jar.has(COOKIE_TENTATIVA_LOGIN_CENTRAL);
+  if (daEquipe && !error && !reset && !local && !tentouAgora) {
     redirect(urlDoLoginCentral(next));
   }
   // Fora da árvore de `app/app/layout.tsx` — sem `IdiomaProvider` do lado do
@@ -168,6 +175,14 @@ export default async function LoginPage({
           >
             {t("Criar conta")}
           </Link>
+        </p>
+        <p>
+          <a
+            href={urlDoLoginCentral(next)}
+            className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          >
+            Equipe IronFox: entrar pelo VulcanOS
+          </a>
         </p>
       </div>
     </div>

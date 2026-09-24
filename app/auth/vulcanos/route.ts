@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { safeNext } from "@/lib/auth/safe-next";
 import { cookieSecure } from "@/lib/supabase/cookie-secure";
-import { COOKIE_TENTATIVA_LOGIN_CENTRAL } from "@/lib/ironfox/vulcanos";
+import { COOKIE_EQUIPE_IRONFOX, COOKIE_TENTATIVA_LOGIN_CENTRAL } from "@/lib/ironfox/vulcanos";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
 
@@ -102,6 +102,13 @@ function ponte(caminho: string, org: string | null): NextResponse {
     secure: cookieSecure(),
     path: "/",
     maxAge: 60,
+  });
+  resposta.cookies.set(COOKIE_EQUIPE_IRONFOX, "1", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: cookieSecure(),
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
   });
   if (org) {
     resposta.cookies.set("active_org", org, {

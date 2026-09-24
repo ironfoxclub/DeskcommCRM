@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { URL_DO_VULCANOS } from "@/lib/ironfox/vulcanos";
+import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,16 @@ export async function GET() {
   } = await supabase.auth.getUser();
 
   if (!user?.email) return NextResponse.redirect(URL_DO_VULCANOS);
+
+  // O VulcanOS é o hub interno da IronFox: só a equipe (admin da plataforma)
+  // atravessa já logada. Cliente que chegar aqui volta para o CRM.
+  const { data: equipe } = await supabase
+    .from("platform_admins")
+    .select("user_id")
+    .eq("user_id", user.id)
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (!equipe) return NextResponse.redirect(new URL("/app", env.NEXT_PUBLIC_APP_URL));
 
   const { data, error } = await createAdminClient().auth.admin.generateLink({
     type: "magiclink",
