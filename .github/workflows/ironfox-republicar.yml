@@ -6,8 +6,9 @@ name: IronFox — republicar a versão atual
 # sobrescreve em ghcr.io/ironfoxclub. Não cria tag nem mexe no ramo — o botão
 # "Atualizar agora" continua seguindo o workflow "acompanha o original".
 #
-# Depois de rodar, no servidor: docker compose -f docker-compose.prod.yml pull app
-# && docker compose -f docker-compose.prod.yml up -d app
+# Depois de rodar, no servidor: docker pull ghcr.io/ironfoxclub/deskcommcrm:X.Y.Z
+# && docker compose -f docker-compose.prod.yml up -d app (o "compose pull" pula
+# imagem com número que já existe localmente).
 
 on:
   workflow_dispatch:
