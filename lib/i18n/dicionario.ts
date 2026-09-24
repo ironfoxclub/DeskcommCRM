@@ -1794,6 +1794,7 @@ export const DICIONARIO: Traducoes = {
   "Aguardando resposta": { es: "Esperando respuesta" },
   "Pausado (atendimento humano)": { es: "Pausado (atención humana)" },
   "Pausado por uma pessoa": { es: "Pausado por una persona" },
+  "Coletando respostas do roteiro": { es: "Recopilando respuestas del guion" },
   "Parou de tentar": { es: "Dejó de intentar" },
   Cancelado: { es: "Cancelado" },
   Agendada: { es: "Programada" },
@@ -4639,6 +4640,16 @@ export const DICIONARIO: Traducoes = {
     es: "El tiempo se cuenta desde la última actividad de una persona en la conversación: asumirla, responder desde la pantalla o desde el celular. Solo se devuelve donde hay un agente publicado. Si la opción está desactivada, rige la regla de siempre: la IA solo vuelve cuando alguien hace clic en Devolver.",
   },
   "Minutos sem resposta da equipe": { es: "Minutos sin respuesta del equipo" },
+  "Quando alguém responde, a conversa fica com essa pessoa?": {
+    es: "Cuando alguien responde, ¿la conversación se queda con esa persona?",
+  },
+  "Desligado, vale a regra de sempre: responder pela tela cala a IA por alguns minutos, e a conversa encerrada que recebe mensagem nova volta para a fila.": {
+    es: "Si está desactivado, rige la regla de siempre: responder desde la pantalla silencia a la IA por algunos minutos, y la conversación cerrada que recibe un mensaje nuevo vuelve a la fila.",
+  },
+  "A conversa fica com quem atendeu": { es: "La conversación se queda con quien la atendió" },
+  "Responder pelo Inbox numa conversa sem dono passa a assumi-la, e a IA fica calada até alguém devolver. Quando o cliente escreve numa conversa encerrada, ela volta direto para o último atendente, sem passar pela distribuição, se ele ainda faz parte da equipe.": {
+    es: "Responder desde el Inbox en una conversación sin responsable la asigna a quien responde, y la IA queda en silencio hasta que alguien la devuelva. Cuando el cliente escribe en una conversación cerrada, vuelve directo al último asesor, sin pasar por la distribución, si todavía forma parte del equipo.",
+  },
   "Entre 5 minutos e 24 horas. Sessenta minutos é a ordem de grandeza de um atendimento humano.": {
     es: "Entre 5 minutos y 24 horas. Sesenta minutos es el orden de magnitud de una atención humana.",
   },
@@ -5511,6 +5522,7 @@ export const DICIONARIO: Traducoes = {
 
   // ─── Inbox: aviso de retenção (before_send) ───
   "sem domingo": { es: "sin domingo" },
+  "horário de": { es: "horario de" },
   "Fora da janela de envio": { es: "Fuera de la ventana de envío" },
   "A resposta fica agendada para a próxima abertura da janela, às": {
     es: "La respuesta queda programada para cuando se abra de nuevo la ventana, a las",
@@ -8058,6 +8070,9 @@ export const DICIONARIO: Traducoes = {
   "Falha ao salvar o teto diário.": { es: "No se pudo guardar el tope diario." },
   "Faltam nome, idioma ou conteúdo.": { es: "Faltan nombre, idioma o contenido." },
   "Fluxo não encontrado.": { es: "Flujo no encontrado." },
+  "Roteiro de atendimento começa por palavra-gatilho ou pelo roteador, não por gatilho de follow-up.": {
+    es: "El guion de atención empieza por palabra clave o por el enrutador, no por un disparador de seguimiento.",
+  },
   "Fluxo não tem rascunho pronto para publicar.": { es: "El flujo no tiene un borrador listo para publicar." },
   "Fluxo reprovado na validação de publish.": { es: "El flujo no pasó la validación de publicación." },
   "Follow-up não encontrado.": { es: "Follow-up no encontrado." },
