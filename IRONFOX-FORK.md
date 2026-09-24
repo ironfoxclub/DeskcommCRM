@@ -17,57 +17,63 @@ original (`melgarafael/DeskcommCRM`) com o **visual do VulcanOS no modo escuro**
 
 O modo claro não muda.
 
-## ⚠️ Não usar o botão "Atualizar agora" do CRM
+## Como o fork se atualiza (sozinho)
 
-O botão (e o `hostgator-setup-kit/update.sh`) baixa a imagem oficial do projeto original
-e **apaga o visual**. Atualização do fork é feita assim:
+O servidor segue **este** repositório: `origin` aponta para `ironfoxclub/DeskcommCRM` e as
+imagens vêm de `ghcr.io/ironfoxclub` (`IMG_NS` em `hostgator-setup-kit/_common.sh`).
 
-## Atualizar para uma versão nova do original
+O workflow `.github/workflows/ironfox-acompanha-o-original.yml` roda a cada 3 horas:
 
-Na máquina de desenvolvimento:
+1. vê a tag mais nova do original (`melgarafael/DeskcommCRM`);
+2. junta essa tag com `ironfox/main` (merge, não rebase);
+3. confere tipos e os testes do fork;
+4. constrói a imagem do app com as nossas mudanças e copia as de worker, scheduler e voz;
+5. publica o ramo e, **por último**, a tag `vX.Y.Z` neste repositório.
+
+Só depois do passo 5 o CRM mostra "Versão X.Y.Z disponível", e aí o botão
+**"Atualizar agora" é seguro**: ele baixa as imagens da IronFox, com o visual.
+
+Se a junção der conflito ou a conferência falhar, o workflow para com erro, o GitHub manda
+e-mail e nenhuma tag é criada: o CRM fica na versão em que está. Para resolver, na máquina
+de desenvolvimento:
 
 ```bash
-git fetch origin --tags
+git fetch https://github.com/melgarafael/DeskcommCRM.git tag vX.Y.Z
 git switch ironfox/main
-git rebase vX.Y.Z          # a tag nova do original
-# conflito? quase sempre é só reaplicar os atributos data-casca da tabela acima
-git push --force-with-lease ironfox ironfox/main
+git merge vX.Y.Z           # resolver os conflitos, rodar os testes
+git push ironfox ironfox/main
+gh workflow run ironfox-acompanha-o-original.yml -R ironfoxclub/DeskcommCRM -f versao=vX.Y.Z
 ```
 
-Depois, no servidor, os passos de "Subir no servidor" abaixo (de `git fetch` em diante).
+Requisitos do lado do GitHub (feitos uma vez):
 
-## Subir no servidor (primeira vez e a cada atualização)
+- ramo padrão do repositório = `ironfox/main` (agendamento só roda no ramo padrão);
+- workflows do original desligados no fork (`relogio`, `vigia-de-colisao`,
+  `publish-image`, `release`);
+- os 4 pacotes em `ghcr.io/ironfoxclub` **públicos** (o servidor e o CRM conferem as
+  imagens sem login);
+- segredo `IRONFOX_TOKEN` (token com escopo `workflow`): sem ele o GitHub recusa o push
+  quando a versão nova do original mexe nos workflows dele.
 
-Na pasta do CRM no servidor (a que tem o `docker-compose.prod.yml` e o `.env`):
+## Apontar o servidor para o fork (uma vez)
+
+Na pasta do CRM no servidor (a que tem o `docker-compose.prod.yml` e o `.env`), com a tag
+já publicada aqui e as imagens públicas:
 
 ```bash
 cp .env .env.antes-do-fork-$(date +%F)          # backup, pra poder voltar
-
-git remote add ironfox https://github.com/ironfoxclub/DeskcommCRM.git 2>/dev/null
-git fetch ironfox ironfox/main
-git checkout -B ironfox/main ironfox/ironfox/main
-
-# Só o app precisa ser construído (worker e scheduler seguem com a imagem oficial).
-# Leva de 10 a 25 minutos e precisa de ~4 GB de RAM livre (ou swap).
-APP_IMAGE=deskcomm-app:ironfox APP_VERSION=$(git describe --tags --abbrev=0)-ironfox \
-  docker compose -f docker-compose.prod.yml -f docker-compose.build.yml build app
-
-# O .env passa a apontar para a imagem local e proíbe baixar a oficial por cima.
-sed -i 's|^APP_IMAGE=.*|APP_IMAGE=deskcomm-app:ironfox|' .env
-grep -q '^APP_PULL_POLICY=' .env \
-  && sed -i 's|^APP_PULL_POLICY=.*|APP_PULL_POLICY=never|' .env \
-  || echo 'APP_PULL_POLICY=never' >> .env
-
-docker compose -f docker-compose.prod.yml up -d app
+git remote set-url origin https://github.com/ironfoxclub/DeskcommCRM.git
+git fetch --tags origin
+git checkout vX.Y.Z
+sed -i '/_IMAGE=/{s|ghcr.io/melgarafael/|ghcr.io/ironfoxclub/|; s|:[^:]*$|:X.Y.Z|}' .env
+docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
 ```
-
-Se a instalação usa mais arquivos de compose (ex.: `docker-compose.traefik.yml`), incluir
-os mesmos `-f` que ela já usa no `up -d`.
 
 ## Voltar para o original (desfazer)
 
 ```bash
 cp .env.antes-do-fork-AAAA-MM-DD .env
-git checkout -B main origin/main && git checkout "$(git describe --tags --abbrev=0 origin/main)"
-docker compose -f docker-compose.prod.yml up -d app
+git remote set-url origin https://github.com/melgarafael/DeskcommCRM.git
+git fetch --tags origin && git checkout "$(git tag -l 'v*' | sort -V | tail -1)"
+docker compose -f docker-compose.prod.yml up -d
 ```
