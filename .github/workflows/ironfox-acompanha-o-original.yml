@@ -1,0 +1,189 @@
+name: IronFox — acompanha o original
+
+# Fork IronFox (ver IRONFOX-FORK.md). O botão "Atualizar agora" do CRM segue as
+# tags DESTE repositório e as imagens de ghcr.io/ironfoxclub. Este workflow é
+# quem as cria: a cada versão nova do original (melgarafael/DeskcommCRM), ele
+# junta a versão com as nossas mudanças, confere, publica as imagens e só então
+# cria a tag — que é o que faz o CRM oferecer a atualização.
+#
+# Se a junção der conflito, ou a conferência falhar, o workflow para com erro
+# (o GitHub avisa por e-mail) e nenhuma tag é criada: o CRM fica onde está.
+#
+# Segredo opcional IRONFOX_TOKEN: token com escopo `workflow`. Sem ele, o push
+# usa o GITHUB_TOKEN, que o GitHub recusa quando a versão nova traz commits que
+# mexem em .github/workflows.
+
+on:
+  schedule:
+    - cron: "23 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Tag do original (ex.: v1.47.0). Vazio = a mais nova."
+        required: false
+
+concurrency:
+  group: ironfox-acompanha-o-original
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  ORIGINAL_REPO: https://github.com/melgarafael/DeskcommCRM.git
+  ORIGINAL_NS: ghcr.io/melgarafael
+  NOSSO_NS: ghcr.io/ironfoxclub
+  RAMO: ironfox/main
+
+jobs:
+  acompanha:
+    if: github.repository == 'ironfoxclub/DeskcommCRM'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RAMO }}
+          fetch-depth: 0
+          token: ${{ secrets.IRONFOX_TOKEN || github.token }}
+
+      - name: Qual versão do original, e se ainda falta
+        id: alvo
+        env:
+          PEDIDA: ${{ inputs.versao }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags "$ORIGINAL_REPO" '+refs/tags/v*:refs/original/v*'
+          if [ -n "${PEDIDA:-}" ]; then
+            tag="$PEDIDA"
+          else
+            tag=$(git for-each-ref --format='%(refname:strip=2)' refs/original/ \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          fi
+          git rev-parse -q --verify "refs/original/$tag" >/dev/null \
+            || { echo "::error::a tag $tag não existe no original"; exit 1; }
+          numero="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "numero=$numero" >> "$GITHUB_OUTPUT"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "$tag já está publicada aqui — nada a fazer"
+            echo "seguir=nao" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # As imagens de fundo (worker, scheduler, voz) vêm prontas do original;
+          # enquanto ele não terminar de publicá-las, espera a próxima rodada.
+          for img in deskcommcrm deskcomm-worker deskcomm-scheduler deskcomm-voice-agent; do
+            if ! docker buildx imagetools inspect "$ORIGINAL_NS/$img:$numero" >/dev/null 2>&1; then
+              echo "$ORIGINAL_NS/$img:$numero ainda não foi publicada — tenta na próxima rodada"
+              echo "seguir=nao" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          done
+          echo "seguir=sim" >> "$GITHUB_OUTPUT"
+          echo "vai publicar $tag"
+
+      - uses: pnpm/action-setup@v6
+        if: steps.alvo.outputs.seguir == 'sim'
+      - uses: actions/setup-node@v7
+        if: steps.alvo.outputs.seguir == 'sim'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Juntar a versão com as nossas mudanças
+        if: steps.alvo.outputs.seguir == 'sim'
+        env:
+          TAG: ${{ steps.alvo.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          antes=$(git rev-parse HEAD)
+          git merge --no-ff --no-commit "refs/original/$TAG" || true
+
+          # O lockfile é gerado: em conflito, parte do original e regenera.
+          if git diff --name-only --diff-filter=U | grep -qx pnpm-lock.yaml; then
+            git checkout --theirs pnpm-lock.yaml
+            pnpm install --lockfile-only
+            git add pnpm-lock.yaml
+          fi
+          # Os workflows do fork ficam como estão (os do original ficam desligados aqui).
+          git restore --source=HEAD --staged --worktree -- .github/workflows
+
+          conflitos=$(git diff --name-only --diff-filter=U)
+          if [ -n "$conflitos" ]; then
+            echo "::error::A versão $TAG do original conflita com as mudanças da IronFox. Nada foi publicado; o CRM continua na versão atual."
+            printf '%s\n' "$conflitos" | sed 's/^/::error::conflito em /'
+            exit 1
+          fi
+          if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            git commit --no-edit -m "Merge tag '$TAG' into $RAMO"
+          fi
+          echo "de $antes para $(git rev-parse HEAD)"
+
+      - name: Conferir (tipos e testes do fork)
+        if: steps.alvo.outputs.seguir == 'sim'
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm exec vitest run \
+            tests/unit/branding.test.ts \
+            tests/unit/navegacao-completude.test.ts \
+            tests/unit/navegacao-registry.test.ts \
+            tests/unit/painel-desenha.test.tsx \
+            tests/unit/rotulo-do-contato.test.ts
+
+      - name: Log in to GHCR
+        if: steps.alvo.outputs.seguir == 'sim'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v4
+        if: steps.alvo.outputs.seguir == 'sim'
+
+      - name: Imagem do app (com as mudanças da IronFox)
+        if: steps.alvo.outputs.seguir == 'sim'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.NOSSO_NS }}/deskcommcrm:${{ steps.alvo.outputs.numero }}
+            ${{ env.NOSSO_NS }}/deskcommcrm:stable
+          labels: |
+            org.opencontainers.image.title=DeskcommCRM (IronFox)
+            org.opencontainers.image.source=https://github.com/ironfoxclub/DeskcommCRM
+            org.opencontainers.image.version=${{ steps.alvo.outputs.numero }}
+          build-args: |
+            APP_VERSION=${{ steps.alvo.outputs.numero }}
+          cache-from: type=gha,scope=ironfox-app
+          cache-to: type=gha,mode=max,scope=ironfox-app
+
+      - name: Imagens de fundo (cópia das do original)
+        if: steps.alvo.outputs.seguir == 'sim'
+        env:
+          NUMERO: ${{ steps.alvo.outputs.numero }}
+        run: |
+          set -euo pipefail
+          for img in deskcomm-worker deskcomm-scheduler deskcomm-voice-agent; do
+            docker buildx imagetools create \
+              --tag "$NOSSO_NS/$img:$NUMERO" --tag "$NOSSO_NS/$img:stable" \
+              "$ORIGINAL_NS/$img:$NUMERO"
+          done
+
+      - name: Publicar o ramo e, por último, a tag
+        if: steps.alvo.outputs.seguir == 'sim'
+        env:
+          TAG: ${{ steps.alvo.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:refs/heads/$RAMO"
+          git tag -a "$TAG" -m "$TAG (original + mudanças da IronFox)"
+          git push origin "refs/tags/$TAG"
+          echo "publicada $TAG — o CRM já pode oferecer a atualização"
