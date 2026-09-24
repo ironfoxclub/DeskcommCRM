@@ -947,6 +947,12 @@ const HOSTS_DECLARADOS: Record<string, EntradaDeHost> = {
     motivo:
       "sufixo do iCalUID gravado no Google Calendar do cliente (lib/agenda/google/evento.ts). Identificador de fio que reconhecemos meses depois — já congelado como PROTOCOLO pela catraca de marca.",
   },
+  // ── fork IronFox: login central ───────────────────────────────────────────
+  "vulcanos-app.vercel.app": {
+    categoria: "FORNECEDOR",
+    motivo:
+      "VulcanOS, o hub da IronFox que faz o login central deste fork (`lib/ironfox/vulcanos.ts`). É destino de chamada; fica fixo no código porque a imagem Docker queima as NEXT_PUBLIC_* no build.",
+  },
 };
 
 describe("catraca de host de terceiro no código que embarca", () => {

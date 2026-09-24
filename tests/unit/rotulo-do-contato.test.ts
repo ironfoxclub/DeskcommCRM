@@ -233,6 +233,12 @@ describe("a sétima cópia não nasce", () => {
       trecho: "display_name: data.display_name ?? null,",
       motivo: "o export de LGPD entrega as DUAS colunas do titular cruas; não decide nome",
     },
+    // ── fork IronFox: Painel ────────────────────────────────────────────────
+    {
+      arquivo: "app/app/painel/_dados.ts",
+      trecho: 'nome: c.display_name || c.phone_number || "WhatsApp",',
+      motivo: "rótulo do CANAL no card de conexões do Painel (channel_sessions), não de contato",
+    },
   ];
 
   /**
