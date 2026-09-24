@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { z } from "zod";
 
 import { createClient } from "@/lib/supabase/server";
 import { safeNext } from "@/lib/auth/safe-next";
@@ -20,11 +21,18 @@ export const dynamic = "force-dynamic";
  * (app/api/v1/agenda/google/callback/route.ts): um 307 daqui ainda pertence à
  * navegação iniciada no VulcanOS, o cookie `Strict` recém gravado não viajaria e o
  * `proxy.ts` mandaria para `/login`.
+ *
+ * `org` (opcional) é a organization do cliente clicado no VulcanOS: vira o cookie
+ * `active_org`, e o CRM já abre nela. Não precisa conferir vínculo aqui — o
+ * `resolveActiveOrg` (lib/auth/server.ts) só aceita o cookie se a pessoa for membro
+ * e, se não for, cai na primeira organization, como sem o cookie.
  */
 export async function GET(request: NextRequest) {
   const url = request.nextUrl;
   const tokenHash = url.searchParams.get("token_hash");
   const next = safeNext(url.searchParams.get("next"), "/app");
+  const orgPedida = url.searchParams.get("org");
+  const org = z.string().uuid().safeParse(orgPedida).success ? orgPedida : null;
   const requestId = request.headers.get("x-request-id");
 
   const redirectTo = (path: string) => NextResponse.redirect(new URL(path, env.NEXT_PUBLIC_APP_URL));
@@ -59,10 +67,10 @@ export async function GET(request: NextRequest) {
     requestId,
   });
 
-  return ponte(destino);
+  return ponte(destino, org);
 }
 
-function ponte(caminho: string): NextResponse {
+function ponte(caminho: string, org: string | null): NextResponse {
   const destino = new URL(caminho, env.NEXT_PUBLIC_APP_URL).toString();
   const seguro = destino
     .replace(/&/g, "&amp;")
@@ -95,5 +103,14 @@ function ponte(caminho: string): NextResponse {
     path: "/",
     maxAge: 60,
   });
+  if (org) {
+    resposta.cookies.set("active_org", org, {
+      httpOnly: true,
+      sameSite: "strict",
+      secure: cookieSecure(),
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30,
+    });
+  }
   return resposta;
 }
