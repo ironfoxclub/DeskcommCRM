@@ -1,0 +1,87 @@
+name: IronFox — republicar a versão atual
+
+# Fork IronFox (ver IRONFOX-FORK.md). Para mudanças da IronFox que não podem
+# esperar a próxima versão do original: reconstrói a imagem do app a partir do
+# ramo ironfox/main com o MESMO número da última tag publicada aqui e a
+# sobrescreve em ghcr.io/ironfoxclub. Não cria tag nem mexe no ramo — o botão
+# "Atualizar agora" continua seguindo o workflow "acompanha o original".
+#
+# Depois de rodar, no servidor: docker compose -f docker-compose.prod.yml pull app
+# && docker compose -f docker-compose.prod.yml up -d app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  NOSSO_NS: ghcr.io/ironfoxclub
+  RAMO: ironfox/main
+
+jobs:
+  republicar:
+    if: github.repository == 'ironfoxclub/DeskcommCRM'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RAMO }}
+          fetch-depth: 0
+
+      - name: Número da versão publicada
+        id: alvo
+        run: |
+          set -euo pipefail
+          tag=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          [ -n "$tag" ] || { echo "::error::nenhuma tag publicada"; exit 1; }
+          echo "numero=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "republicando ${tag#v} a partir de $(git rev-parse --short HEAD)"
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Conferir (tipos e testes do fork)
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm exec vitest run \
+            tests/unit/branding.test.ts \
+            tests/unit/navegacao-completude.test.ts \
+            tests/unit/navegacao-registry.test.ts \
+            tests/unit/painel-desenha.test.tsx \
+            tests/unit/rotulo-do-contato.test.ts
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Imagem do app (com as mudanças da IronFox)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.NOSSO_NS }}/deskcommcrm:${{ steps.alvo.outputs.numero }}
+            ${{ env.NOSSO_NS }}/deskcommcrm:stable
+          labels: |
+            org.opencontainers.image.title=DeskcommCRM (IronFox)
+            org.opencontainers.image.source=https://github.com/ironfoxclub/DeskcommCRM
+            org.opencontainers.image.version=${{ steps.alvo.outputs.numero }}
+          build-args: |
+            APP_VERSION=${{ steps.alvo.outputs.numero }}
+          cache-from: type=gha,scope=ironfox-app
+          cache-to: type=gha,mode=max,scope=ironfox-app
