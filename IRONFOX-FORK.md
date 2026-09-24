@@ -47,6 +47,18 @@ git push ironfox ironfox/main
 gh workflow run ironfox-acompanha-o-original.yml -R ironfoxclub/DeskcommCRM -f versao=vX.Y.Z
 ```
 
+Para mudança da IronFox que não pode esperar a próxima versão do original, o workflow
+`.github/workflows/ironfox-republicar.yml` (manual) reconstrói a imagem do app a partir de
+`ironfox/main` com o **mesmo número** da última tag e a sobrescreve. Depois, no servidor
+(o `pull` do compose pula imagem com número que já existe, por isso o `docker pull`):
+
+```bash
+gh workflow run ironfox-republicar.yml -R ironfoxclub/DeskcommCRM
+# quando terminar, no servidor, em /root/deskcommcrm/hostgator-setup-kit/deskcommcrm:
+docker pull ghcr.io/ironfoxclub/deskcommcrm:X.Y.Z
+docker compose -f docker-compose.prod.yml up -d app
+```
+
 Requisitos do lado do GitHub (feitos uma vez):
 
 - ramo padrão do repositório = `ironfox/main` (agendamento só roda no ramo padrão);
