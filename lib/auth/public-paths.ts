@@ -7,6 +7,10 @@ export const PUBLIC_PATHS: RegExp[] = [
   /^\/login(\/.*)?$/,
   /^\/signup$/,
   /^\/auth\/confirm$/,
+  // Fork IronFox: chegada do login central do VulcanOS (app/auth/vulcanos/route.ts).
+  // Vem de outro site, sem o cookie Strict; a identidade vem do link de uso único
+  // trocado por sessão dentro da rota. Âncora `$`: nenhum sub-path nasce público.
+  /^\/auth\/vulcanos$/,
   // A VOLTA DA ENTRADA COM GOOGLE (issue #1388). Quem chega aqui é o NAVEGADOR
   // que o Google devolveu, via 302 do GoTrue — navegação vinda de outro site,
   // onde o cookie de sessão (`sameSite: "strict"`) não viaja por definição.

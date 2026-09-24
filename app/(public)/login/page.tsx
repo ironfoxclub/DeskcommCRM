@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
 import { EntrarComGoogle } from "@/components/auth/EntrarComGoogle";
 import { LoginForm } from "@/components/auth/LoginForm";
@@ -6,15 +8,24 @@ import { branding } from "@/lib/branding";
 import { createClient } from "@/lib/supabase/server";
 import { idiomaDoVisitante } from "@/lib/i18n/idiomaAnonimo";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { COOKIE_TENTATIVA_LOGIN_CENTRAL, urlDoLoginCentral } from "@/lib/ironfox/vulcanos";
 
 export const metadata = { title: "Entrar" };
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; reset?: string; error?: string }>;
+  searchParams: Promise<{ next?: string; reset?: string; error?: string; local?: string }>;
 }) {
-  const { next, reset, error } = await searchParams;
+  const { next, reset, error, local } = await searchParams;
+  // Fork IronFox — login central: a senha é pedida no VulcanOS, que devolve a
+  // pessoa logada aqui (ver lib/ironfox/vulcanos.ts). Fica nesta tela quando há
+  // aviso a mostrar (`error`, `reset`), quando alguém pede a tela daqui
+  // (`?local=1`) ou quando o login central acabou de falhar (cookie de tentativa).
+  const tentouAgora = (await cookies()).has(COOKIE_TENTATIVA_LOGIN_CENTRAL);
+  if (!error && !reset && !local && !tentouAgora) {
+    redirect(urlDoLoginCentral(next));
+  }
   // Fora da árvore de `app/app/layout.tsx` — sem `IdiomaProvider` do lado do
   // servidor (o cliente já tem o seu, montado em `app/(public)/layout.tsx`).
   // Quase nunca há sessão aqui (é a própria tela de entrar), mas resolve do
