@@ -129,6 +129,17 @@
   font-weight: 400;
 }
 
+/* Números do /painel ("1 em aberto"): com a Clash Grotesk o espaço entre o
+   número grande e o rótulo quase some e o rótulo parecia colado embaixo.
+   Afasta e sobe o rótulo pro meio da altura do número. Seletor pelas classes
+   do `Numero` (app/app/painel/_components/PainelClient.tsx), único a usar
+   `text-[28px]` — se a atualização do original mudar as classes, a regra só
+   deixa de valer, sem quebrar nada. */
+p.text-\[28px\] > span.text-\[12px\] {
+  margin-left: 0.5em;
+  vertical-align: 0.55em;
+}
+
 /* ── Fundo: breu + manchas vinho + granulado ──────────────────────────────── */
 
 [data-theme="dark"] [data-casca="raiz"] {
