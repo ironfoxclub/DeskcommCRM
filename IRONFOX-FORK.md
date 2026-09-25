@@ -8,7 +8,8 @@ original (`melgarafael/DeskcommCRM`) com o **visual do VulcanOS no modo escuro**
 
 | Arquivo | Mudança |
 |---|---|
-| `app/tema-vulcanos.css` | Todo o visual: degradê vinho, granulado, placa de vidro, sidebar, pop-ups, botões |
+| `app/tema-vulcanos.css` | Todo o visual: degradê vinho, granulado, placa de vidro, sidebar, pop-ups, botões, fontes da IronFox (Clash Grotesk + Fraunces) |
+| `app/_fontes-ironfox/` | Arquivos das fontes usadas pelo CSS acima (arquivo novo, sem conflito) |
 | `app/layout.tsx` | Importa o CSS acima |
 | `app/app/_components/AppShell.tsx` | Atributos `data-casca` (raiz, coluna, conteúdo) |
 | `components/shell/Sidebar.tsx` | Atributo `data-casca="sidebar"`; uma linha que põe o seletor de modo abaixo da marca |
