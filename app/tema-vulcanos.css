@@ -15,7 +15,8 @@
    especificidade 0,3,0) continua vencendo a rampa vinho daqui (0,2,0): quem
    configurar outra cor em /admin/marca vê a dele.
 
-   O modo CLARO não é tocado por nada deste arquivo.
+   O modo CLARO não é tocado por nada deste arquivo, com uma exceção: as
+   fontes (seção "Fontes"), que são as mesmas nos dois modos.
    ───────────────────────────────────────────────────────────────────────── */
 
 :root[data-theme="dark"] {
@@ -54,18 +55,16 @@
 
   /* Barra de rolagem vinho, como no VulcanOS */
   scrollbar-color: #630102 transparent;
-
-  /* Fontes da IronFox, as mesmas do VulcanOS (ver "Fontes" abaixo) */
-  --font-sans: "Clash Grotesk", ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", Roboto, sans-serif;
 }
 
 /* ── Fontes: Clash Grotesk no texto, Fraunces nos títulos ─────────────────
+   Exceção à regra do arquivo: valem nos modos CLARO e ESCURO (decisão de
+   2026-09-25 — a fonte é a mesma nos dois).
    Arquivos em `app/_fontes-ironfox/` (pasta privada do App Router) e não em
    `public/`: com `url()` relativo o Next empacota as fontes em
    `/_next/static/media`, que o `proxy.ts` já deixa passar sem login — de
    `public/` a tela de login levaria redirecionamento no lugar da fonte.
-   O `@font-face` só declara; nada baixa enquanto o modo claro estiver ativo. */
+   */
 
 @font-face {
   font-family: "Clash Grotesk";
@@ -116,13 +115,16 @@
   font-display: swap;
 }
 
-[data-theme="dark"] body {
-  font-family: var(--font-sans);
+/* O `--font-atkinson` vem de uma classe do next/font no <html> (0,1,0);
+   `:root:root` (0,2,0) vence, e o `body` e o utilitário `font-sans`, que
+   leem essa variável, passam a usar a Clash Grotesk sem mais nada. */
+:root:root {
+  --font-atkinson: "Clash Grotesk";
 }
 
 /* Títulos de página e de seção (e de janela) em Fraunces de peso normal, como
    o `font-serif` dos h1/h2 do VulcanOS. */
-[data-theme="dark"] :is(h1, h2) {
+:is(h1, h2) {
   font-family: "Fraunces", ui-serif, Georgia, serif;
   font-weight: 400;
 }
