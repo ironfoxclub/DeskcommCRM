@@ -181,9 +181,14 @@ jobs:
         if: steps.alvo.outputs.seguir == 'sim'
         env:
           TAG: ${{ steps.alvo.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git push origin "HEAD:refs/heads/$RAMO"
           git tag -a "$TAG" -m "$TAG (original + mudanças da IronFox)"
           git push origin "refs/tags/$TAG"
+          # A tela do CRM pergunta a /releases/latest, não às tags: sem release,
+          # ela mostra "Não consegui checar se há versão nova".
+          gh release create "$TAG" --verify-tag --latest \
+            --title "$TAG" --notes "$TAG do original + mudanças da IronFox."
           echo "publicada $TAG — o CRM já pode oferecer a atualização"
