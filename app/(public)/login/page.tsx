@@ -181,7 +181,7 @@ export default async function LoginPage({
             href={urlDoLoginCentral(next)}
             className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
           >
-            Equipe IronFox: entrar pelo VulcanOS
+            {t("Equipe IronFox: entrar pelo VulcanOS")}
           </a>
         </p>
       </div>

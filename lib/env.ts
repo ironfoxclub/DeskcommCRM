@@ -135,10 +135,13 @@ const schema = z.object({
   // instaláveis (import/install) usam `pg` cru (mesmo pool do agent-engine).
   SUPABASE_DB_URL: required("SUPABASE_DB_URL"),
   /**
-   * A conexão de DDL do KIT (install.sh/update.sh/backup.sh), não do app —
-   * declarada aqui só porque o `docker-compose.prod.yml` entrega o `.env`
-   * inteiro ao app e ao worker (`env_file`), e uma chave que chega ao processo
-   * merece estar no contrato em vez de ser um desconhecido tolerado.
+   * A conexão de DDL do KIT (install.sh/update.sh/backup.sh), não do app.
+   * O `docker-compose.prod.yml` entrega o `.env` inteiro ao app, ao worker e
+   * ao voice-agent (`env_file`), e desde o #1680 sobrescreve esta chave com
+   * vazio no `environment:` deles — no processo ela chega vazia. A declaração
+   * fica porque quem roda fora desse compose (dev local, `next start` à mão)
+   * ainda a recebe do `.env`, e uma chave que chega ao processo merece estar no
+   * contrato em vez de ser um desconhecido tolerado.
    *
    * NENHUM código de app pode lê-la: ela é o DONO do banco quando a instalação
    * é num Supabase próprio, e `SUPABASE_DB_URL` é a role menor de propósito
@@ -206,6 +209,10 @@ const schema = z.object({
   VERCEL_AI_GATEWAY_URL: z.string().optional().default(""),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   OPENAI_API_KEY: z.string().optional().default(""),
+  // Esforço de raciocínio dos modelos da OpenAI (o*, gpt-5*, gpt-6*). `z.string()`
+  // e NUNCA `z.enum` (motivo mais abaixo, em AGENT_DISPATCH_CONSUMER): quem valida
+  // a grafia é o boot do worker, em `lib/agent-engine/env.ts`.
+  OPENAI_REASONING_EFFORT: z.string().optional().default(""),
   // Transcrição de áudio num serviço COMPATÍVEL com o da OpenAI (Groq, um
   // Whisper próprio): a chave vale só para `/audio/transcriptions` — a conversa
   // com o cliente e a leitura de imagem continuam no provedor do ponto.
@@ -215,6 +222,11 @@ const schema = z.object({
   TRANSCRIPTION_API_KEY: z.string().optional().default(""),
   TRANSCRIPTION_BASE_URL: z.string().optional().default(""),
   TRANSCRIPTION_MODEL: z.string().optional().default(""),
+  // Endereço da API do Jev (TypeSafe AI). Vazio é ausente: vale
+  // https://api.typesafe.ai. Existe para o dublê do e2e — a CHAVE nunca vem
+  // daqui, é por organização (BYOK). Quem lê é `baseDaApiDoJev()`, em
+  // lib/ai/decisao/cliente.ts.
+  JEV_API_BASE_URL: z.string().optional().default(""),
   // Destinos internos que o DONO DA INSTALAÇÃO autoriza (decisão 22-d, #1004):
   // IPv4 e faixas CIDR IPv4 que a saída pode alcançar mesmo sendo rede interna,
   // e só para destinos que a própria INSTALAÇÃO configura (nunca o endereço que
@@ -382,6 +394,14 @@ const schema = z.object({
    * respondendo 500 a tudo.
    */
   CASE_ALERT_RETENTION_DAYS: z.string().optional().default(""),
+  /**
+   * Candidato da prospecção nativa vencido (migration 0408, issue #1313).
+   * `z.string()` pela MESMA razão das cinco acima — quem interpreta é
+   * `lib/retencao/politica.ts`, onde lixo resolve para o lado seguro e o
+   * operador vê o aviso no log, em vez de o contêiner ficar `healthy`
+   * respondendo 500 a tudo. Padrão 365, piso 90, decisão do dono (PR #1577).
+   */
+  PROSPECCAO_RETENTION_DAYS: z.string().optional().default(""),
 
   // LGPD export (S-08.04)
   LGPD_SIGNING_KEY: z.string().optional().default(""),
@@ -529,9 +549,9 @@ if (env.NODE_ENV === "production") {
 // Este processo só conhece as chaves do AMBIENTE. As credenciais cadastradas em
 // IA › Credenciais moram no banco e são resolvidas mais tarde, no contexto da
 // organização; por isso ausência aqui nunca pode virar diagnóstico de "IA muda".
-// `OPENROUTER_API_KEY` entra na condição porque `isAiGatewayConfigured()`
-// (lib/ai/gateway.ts) e `resolveLanguageModel` a tratam como configuração
-// válida no ambiente, assim como gateway e Anthropic.
+// `OPENROUTER_API_KEY` entra na condição porque `resolveLanguageModel`
+// (lib/ai/gateway.ts) a trata como configuração válida no ambiente, assim como
+// gateway e Anthropic.
 // `OPENAI_API_KEY` entra pelo mesmo motivo, com a diferença que o aviso não
 // precisa esconder: ela atende os pontos do provedor que a ORGANIZAÇÃO escolheu
 // (é o último degrau de `resolverModeloDoPonto`, lib/ai/gateway-binding.ts).

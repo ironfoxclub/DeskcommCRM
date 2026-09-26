@@ -43,6 +43,17 @@ recusar_projeto_de_outra_arvore || die "Atualização interrompida para não que
 # "já está na versão mais recente" sairia sem entregar a troca.
 if [ "${SINGLE_SERVER:-0}" = "1" ]; then
   recusar_supabase_de_outra_arvore || die "Atualização interrompida para não mexer no Supabase de outra instalação."
+  # A porta direta do GoTrue acompanha o `signup_mode` da instalação (#1653).
+  # Antes do SMTP de propósito: é o caminho que roda MESMO quando o update não
+  # tem nada a atualizar (a saída "você já está na versão mais recente" fica
+  # mais abaixo), então quem trocou "só convite" na tela e rodou o update leva
+  # o `DISABLE_SIGNUP` no mesmo comando — e é ele que fecha
+  # `POST /auth/v1/signup` para quem tem a anon key. Esta chamada roda com o
+  # kit ANTERIOR ao checkout; a da versão nova fica dentro de
+  # `atualizar_supabase_single_server` (_common.sh), mais abaixo.
+  if sincronizar_signup_mode_do_gotrue; then
+    dc_supabase up -d --no-deps auth >/dev/null 2>&1 || c_ylw "⚠ Não consegui reiniciar o auth do Supabase com o modo de cadastro (#1653)."
+  fi
   if sincronizar_smtp_do_gotrue; then
     dc_supabase up -d --no-deps auth >/dev/null 2>&1 || c_ylw "⚠ Não consegui reiniciar o auth do Supabase com o SMTP do CRM."
   else
@@ -60,8 +71,13 @@ setup_update_agent_cron
 # ── 1. Tem atualização mesmo? ────────────────────────────────────────────────
 step "Procurando atualizações"
 git fetch --tags --quiet origin 2>/dev/null || c_ylw "⚠ não consegui falar com o GitHub — sigo com o código que já está aqui."
-[ -n "$TARGET_TAG" ] || TARGET_TAG="$(git tag -l 'v*' --sort=-v:refname | head -1)"
-[ -n "$TARGET_TAG" ] || die "Não encontrei nenhuma versão publicada para instalar."
+# A AUTORIDADE é a release publicada, NUNCA a maior tag — ver
+# `ultima_release_estavel` em _common.sh. Um `TARGET_TAG` passado à mão
+# continua valendo (instalar uma versão específica é operação legítima de
+# quem sabe o que está fazendo); o que deixou de existir é ESCOLHER sozinho a
+# maior tag, que instalaria código sem release publicada.
+[ -n "$TARGET_TAG" ] || TARGET_TAG="$(ultima_release_estavel)"
+[ -n "$TARGET_TAG" ] || die "Não encontrei nenhuma versão publicada para instalar. (Tag existir não basta: o alvo é a última release estável publicada no GitHub. Se o servidor não conseguiu falar com a API, tente de novo mais tarde; para instalar uma versão específica, passe --to vX.Y.Z.)"
 git rev-parse --verify --quiet "${TARGET_TAG}^{commit}" >/dev/null \
   || die "Não conheço a versão $TARGET_TAG aqui. Confira o nome (ex.: v1.1.0) ou tente de novo quando o servidor conseguir falar com o GitHub."
 CURRENT_TAG="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
@@ -211,6 +227,9 @@ source "$KIT_DIR/manutencao.sh"
 # Single-server: o Supabase vai para a versão pinada no código novo ANTES do
 # banco (o passo 4 pausa peças dele, e um `up` depois as religaria).
 if [ "${SINGLE_SERVER:-0}" = "1" ]; then
+  # Esta função também sincroniza o modo de cadastro com o GoTrue (#1653). A
+  # chamada mora DENTRO dela, e não numa linha aqui, porque é o corpo dela que
+  # o update.sh antigo executa na atualização que traz o conserto.
   atualizar_supabase_single_server || die "O Supabase desta VPS não subiu (erro acima). NÃO mexi no banco do CRM."
 fi
 
@@ -462,6 +481,12 @@ if [ -f supabase/baseline.sql ]; then
 else
   c_ylw "⚠ supabase/baseline.sql não encontrado — pulei a parte do banco."
 fi
+# Retentativa não cura estes: a migration NÃO chegou, e seguir daqui trocava o
+# app por cima de um banco pela metade com status 0 — o "deu certo" do cron.
+# DEPOIS da conferência das regras de isolamento, nunca antes: ela recria as que
+# faltam e, se não conseguir, mantém o CRM parado. Sair antes dela deixaria o
+# trap subir o app sem regra — tela vazia para todo mundo.
+[ -z "$BANCO_RESTANTE" ] || die "O banco NÃO terminou limpo e os erros acima repetir não cura: a migration NÃO chegou. A atualização PARA aqui."
 [ -n "${DESKCOMM_AGENT_REPORT:-}" ] && eval "${DESKCOMM_AGENT_REPORT_CMD}" banco
 
 # ── 4.5 E-mails de acesso, para quem já estava instalado ────────────────────

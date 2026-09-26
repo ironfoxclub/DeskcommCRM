@@ -89,6 +89,8 @@ import { applyScheduleFollowup, type FollowupWindowKnobs } from './schedule-foll
 import {
   avisarLeadDaEscalacao,
   avisarLeadLendoOContato,
+  type AvisoDeEscalacaoIds,
+  type AvisoDeEscalacaoOpts,
   type DesfechoDoAviso,
 } from './aviso-de-escalacao';
 import {
@@ -130,7 +132,7 @@ import {
   catalogoEntregueAoOperador,
 } from './entrega-de-capacidade';
 import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
-import { matchesHandoffKeyword } from './agent-config';
+import { matchesHandoffKeyword, type PublishedAgentConfig } from './agent-config';
 import { garantirPerguntaDoRoteiro, prepararRoteiroDoTurno } from './roteiro-no-turno';
 import { validarRespostaDoFluxo } from './flow-validate';
 import { moduloLigadoComMemo } from '@/lib/instalacao/modulos';
@@ -191,6 +193,7 @@ import { camadaLigada, lerCamadasDaOrg } from '../guardrails/camadas-da-org';
 import { fusoDaOrganizacao } from './fuso-da-org';
 import { renderAgora } from '@/lib/tempo/agora';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
+import { anotarUltimaInboundVista, ultimaInboundJaRespondida } from './turno-ja-respondido';
 
 /**
  * Superfície ESTÁTICA das tools do agente (description + inputSchema) — parte do
@@ -1736,6 +1739,231 @@ export async function avisarCapacidadesAusentes(
 }
 
 /**
+ * AS DETERMINÍSTICAS DO INBOUND, TAMBÉM ANTES DO RASCUNHO DO ASSISTIDO (#1648).
+ *
+ * O ramo assistido devolvia ANTES das detecções de STOP/opt-out e de pedido de
+ * humano. Na prática o contato escrevia "pare de me mandar mensagem" e o bot
+ * seguia elegível: sem silêncio durável (`force_human` +
+ * `bot_silenced_until='infinity'`), sem cancelamento dos follow-ups agendados e
+ * sem item de handoff na Central — só um rascunho na fila de aprovação, que
+ * alguém podia nunca aprovar. Risco de LGPD: o pedido de parar ficava
+ * dependendo de uma autorização humana que podia nunca vir, e quando ela vinha
+ * o contato já tinha recebido mais mensagens no meio-tempo.
+ *
+ * Estas detecções são regex sobre o que o cliente ainda NÃO teve resposta — não
+ * gastam token, não chamam modelo e não dependem do modo de operação. É por
+ * isso que elas podem (e devem) rodar aqui, antes do desvio para
+ * `generateReplyDraft`, com o MESMO mecanismo durável do caminho automático:
+ *
+ *   1. `avisarLeadDaEscalacao` PRIMEIRO — ordem obrigação, não estilo: o aviso
+ *      tem de sair antes de `force_human` armar o gate que o vetaria;
+ *   2. `performHumanHandoff` — silencia para sempre, cancela os crons
+ *      pendentes, grava a passagem e abre (ou adenda) o item na Central.
+ *
+ * Idempotente, como lá: um retry re-executa tudo sem duplicar efeito. Devolve
+ * `true` quando o turno foi silenciado — aí não há rascunho o que rascunhar e
+ * nada mais pode sair nele.
+ */
+export async function deteccoesDeterministicasDoAssistido(
+  pool: pg.Pool,
+  deps: InboundTurnDeps,
+  args: {
+    job: JobRow;
+    tenantId: string;
+    conversationId: string;
+    channelSessionId: string;
+    leadId: string;
+    agent: PublishedAgentConfig;
+    log: Logger;
+    /**
+     * Mensagem fixada no job — plano B quando a leitura do contexto do lead
+     * falha. Um pedido de parar não pode virar "sem detecção" só porque o CRM
+     * está fora do ar; a mensagem que acordou o turno é a mesma de sempre.
+     */
+    inboundMessageId?: string;
+  },
+): Promise<boolean> {
+  const { job, tenantId, conversationId, channelSessionId, leadId, agent, log } = args;
+  const clock = deps.clock ?? ((): Date => new Date());
+
+  // O QUE O CLIENTE DISSE e ainda não foi respondido — a MESMA fonte do caminho
+  // automático (`inboundsNaoRespondidos`): um pedido de parar que chegou na 2ª
+  // mensagem de uma rajada não pode ser calado por ler só a última linha.
+  let inboundsPendentes: string[] = [];
+  let optedOutThisTurn = false;
+  let lgpd: AvisoDeEscalacaoOpts['lgpd'];
+  let contextoLido = false;
+  try {
+    const abertura = await getLeadContext(
+      pool,
+      deps.crmCfg,
+      {
+        tenantId,
+        leadId,
+        conversationId,
+        fuso: await fusoDaOrganizacao(pool, tenantId, log),
+      },
+      { historyLimit: agent.historyMessageWindow, maxTokens: agent.historyTokenWindow },
+    );
+    if (abertura.ok) {
+      contextoLido = true;
+      inboundsPendentes = inboundsNaoRespondidos(abertura.context.messages);
+      optedOutThisTurn = abertura.context.contact.is_blocked;
+      lgpd = abertura.lgpd;
+    } else {
+      log.warn('modo assistido: contexto do lead não lido — detecção cai na mensagem fixada', {
+        code: abertura.error.code,
+      });
+    }
+  } catch (err) {
+    log.warn('modo assistido: contexto do lead falhou — detecção cai na mensagem fixada', {
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+    });
+  }
+  // O plano B NUNCA sobrescreve o contexto lido: ele existe só quando a leitura
+  // falhou, e aí a mensagem fixada no job é o que temos.
+  if (!contextoLido && args.inboundMessageId !== undefined) {
+    try {
+      const fixada = await loadInboundBodyForJob(pool, {
+        tenantId,
+        conversationId,
+        inboundMessageId: args.inboundMessageId,
+      });
+      if (fixada !== null && fixada.trim() !== '') inboundsPendentes = [fixada];
+    } catch (err) {
+      log.warn('modo assistido: mensagem fixada não lida — sem detecção neste turno', {
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+      });
+    }
+  }
+
+  /** Args do aviso, montados NO MOMENTO do uso — o canal nasce só se algo casar. */
+  const avisoDaEscalacao = (): {
+    ids: AvisoDeEscalacaoIds;
+    base: Omit<AvisoDeEscalacaoOpts, 'motivo'>;
+  } => ({
+    ids: {
+      tenantId,
+      leadId,
+      conversationId,
+      channelSessionId,
+      jobId: job.id,
+      jobClaim: claimOfJob(job),
+    },
+    base: {
+      channel: deps.channel
+        ? deps.channel(pool)
+        : new WahaChannelAdapter(pool, { ...deps.crmCfg, agentActorId: agent.agentId }),
+      optedOutThisTurn,
+      now: clock(),
+      log,
+      ...(lgpd !== undefined ? { lgpd } : {}),
+      agentId: agent.agentId,
+      ...(deps.knobs.disclosureMode !== undefined
+        ? { disclosureMode: deps.knobs.disclosureMode }
+        : {}),
+      ...(deps.sleep !== undefined ? { sleep: deps.sleep } : {}),
+    },
+  });
+
+  // PLANO B SEM CONTEXTO = SEM `lgpd`: com ele nulo o gate de LGPD passa direto
+  // (`before-send.ts`), e um contato anonimizado receberia o aviso. Nesse ramo o
+  // aviso sai por `avisarLeadLendoOContato`, que lê o contato do banco.
+  const semInsumosDoContexto = ({
+    optedOutThisTurn: _bloqueado,
+    lgpd: _lgpd,
+    ...resto
+  }: Omit<AvisoDeEscalacaoOpts, 'motivo'>): Omit<
+    AvisoDeEscalacaoOpts,
+    'motivo' | 'optedOutThisTurn' | 'lgpd'
+  > => resto;
+
+  if (
+    inboundsPendentes.some(
+      (texto) =>
+        detectHumanHandoffRequest(texto) ||
+        matchesHandoffKeyword(texto, agent.handoffKeywords),
+    )
+  ) {
+    const briefing = montarBriefingDaPassagem({
+      checkpoint: await latestCheckpoint(pool, tenantId, leadId),
+      pendentesDoCliente: inboundsPendentes,
+      motivo: { codigo: 'requested_human' },
+    });
+    const aviso = avisoDaEscalacao();
+    const desfecho = contextoLido
+      ? await avisarLeadDaEscalacao(pool, aviso.ids, { ...aviso.base, motivo: 'pediu_humano' })
+      : await avisarLeadLendoOContato(pool, aviso.ids, {
+          ...semInsumosDoContexto(aviso.base),
+          motivo: 'pediu_humano',
+        });
+    await performHumanHandoff(
+      pool,
+      { tenantId, leadId, conversationId },
+      {
+        reason: 'requested_human',
+        conversationSummary: briefing.body,
+        passagem: { origem: 'pedido_explicito', motivoCodigo: 'requested_human', briefing },
+        avisoAoLead: desfecho,
+        log,
+      },
+    );
+    log.info(
+      'handoff humano acionado por pedido explícito do lead (modo assistido, detecção determinística)',
+      { kind: job.kind, lead_avisado: desfecho.avisado },
+    );
+    return true;
+  }
+
+  // STOP AMBÍGUO — o rascunho pendente NÃO segura este ramo: o pedido de parar
+  // vale por si, e é ele que cancela os follow-ups agendados (LGPD #1648).
+  if (inboundsPendentes.some((texto) => detectAmbiguousOptOut(texto))) {
+    const briefing = montarBriefingDaPassagem({
+      checkpoint: await latestCheckpoint(pool, tenantId, leadId),
+      pendentesDoCliente: inboundsPendentes,
+      motivo: { codigo: 'suspected_optout' },
+    });
+    const aviso = avisoDaEscalacao();
+    const desfecho = contextoLido
+      ? await avisarLeadDaEscalacao(pool, aviso.ids, { ...aviso.base, motivo: 'suspeita_de_opt_out' })
+      : await avisarLeadLendoOContato(pool, aviso.ids, {
+          ...semInsumosDoContexto(aviso.base),
+          motivo: 'suspeita_de_opt_out',
+        });
+    await performHumanHandoff(
+      pool,
+      { tenantId, leadId, conversationId },
+      {
+        reason: 'suspected_optout',
+        conversationSummary: briefing.body,
+        inboxTitle: 'Suspeita de opt-out — confirmar bloqueio do contato no CRM',
+        passagem: { origem: 'opt_out_provavel', motivoCodigo: 'suspected_optout', briefing },
+        avisoAoLead: desfecho,
+        log,
+      },
+    );
+    log.info(
+      'possível opt-out detectado no modo assistido — bot silenciado, follow-ups cancelados e escalado ao humano',
+      { kind: job.kind, lead_avisado: desfecho.avisado },
+    );
+    return true;
+  }
+
+  // Opt-out JÁ registrado na fonte (CRM): sem mensagem nova que casasse acima,
+  // mas os crons podem ter nascido depois do bloqueio. Idempotente — o mesmo
+  // cancel que o handoff acima compartilha (F4-07).
+  if (optedOutThisTurn) {
+    const canceled = await cancelPendingCronsForLead(pool, tenantId, leadId);
+    if (canceled > 0) {
+      log.info('opt-out já registrado — follow-ups agendados cancelados (modo assistido)', {
+        canceled,
+      });
+    }
+  }
+  return false;
+}
+
+/**
  * O NÚCLEO DO TURNO, SEMPRE SOB A ESCOLTA DO ORÇAMENTO.
  *
  * Esta função é o único ponto do produto por onde os três kinds de turno de
@@ -2026,7 +2254,34 @@ async function executarTurnoDoAgente(
         inbound: liveJob().kind === 'inbound_turn',
       }, { log: runLog });
   const agentConfig = routed.config;
-  if (!preview && agentConfig?.operationMode === 'assisted' && job?.kind === 'inbound_turn') {
+  if (
+    !preview &&
+    agentConfig?.operationMode === 'assisted' &&
+    job !== null &&
+    (job.kind === 'inbound_turn' || job.kind === 'followup_turn')
+  ) {
+    // #1648 — as detecções DETERMINÍSTICAS (STOP/opt-out e pedido de humano)
+    // rodam ANTES do desvio para o rascunho. Elas não gastam token e não
+    // dependem do modo de operação, e o pedido de parar não pode esperar
+    // aprovação humana para ser registrado (LGPD). `true` = turno silenciado
+    // (aviso já enviado, silêncio durável e crons cancelados): aí não há
+    // rascunho o que rascunhar.
+    if (
+      await deteccoesDeterministicasDoAssistido(pool, deps, {
+        job,
+        tenantId,
+        conversationId: input.conversationId,
+        channelSessionId: input.channelSessionId,
+        leadId,
+        agent: agentConfig,
+        log: runLog,
+        ...(input.inboundMessageId !== undefined
+          ? { inboundMessageId: input.inboundMessageId }
+          : {}),
+      })
+    ) {
+      return;
+    }
     const { generateReplyDraft } = await import('./reply-drafts');
     await generateReplyDraft(pool, deps, {
       organizationId: tenantId,
@@ -2036,6 +2291,14 @@ async function executarTurnoDoAgente(
       boundary: currentExecutionBoundary() ?? undefined,
       agent: agentConfig,
     });
+    if (job.kind === 'followup_turn') {
+      // #1648 (3): o follow-up do assistido caía no `return` genérico de baixo
+      // e sumia — sem envio, sem rascunho e sem aviso. Vira rascunho, como o
+      // inbound: o humano vê, edita, aprova ou rejeita.
+      runLog.info('follow-up de agente assistido virou rascunho — nada sai sem aprovação', {
+        conversation_id: input.conversationId,
+      });
+    }
     return;
   }
   if (!preview && agentConfig && (agentConfig.pausedAt || agentConfig.operationMode === 'assisted'))
@@ -3765,7 +4028,11 @@ async function executarTurnoDoAgente(
         }
         const mcp = await buildMcpTurnTools(
           deps.crmCfg,
-          { organizationId: tenantId, jobId: preview?.runId ?? liveJob().id },
+          {
+            organizationId: tenantId,
+            jobId: preview?.runId ?? liveJob().id,
+            ...(leadId ? { contactId: leadId } : {}),
+          },
           configDoTurno,
           runLog,
           preview ? { readOnly: true } : undefined,
@@ -4068,6 +4335,12 @@ async function executarTurnoDoAgente(
         messages: openingMessages,
         tools,
         maxSteps,
+        // Rascunho: a resposta é o send_message ACEITO; a etapa seguinte só
+        // "encerrava". Aceito, e não chamado: o envio vetado pela cadeia
+        // before_send volta ao modelo para ele reescrever (o 1º veto ensina).
+        ...(preview?.kind === 'assisted'
+          ? { pararQuando: () => preview.result.candidates.length > 0 }
+          : {}),
         ...(agentConfig !== null
           ? {
               model: agentConfig.model,
@@ -4182,6 +4455,25 @@ async function executarTurnoDoAgente(
     // turno. Aqui o lead já recebeu resposta, mas a conversa ficaria sem
     // checkpoint e sem dono, e o próximo inbound cairia no mesmo bloqueio, agora
     // sem nada tendo mudado no meio.
+    // Prévia sem candidato e sem impedimento: quem opera precisa saber que o agente não propôs nada.
+    const avisarSemCandidato = (p: NonNullable<typeof preview>): void => {
+      if (p.result.candidates.length === 0 && p.result.impediments.length === 0)
+        p.result.impediments.push({
+          code: 'no_candidate',
+          message: 'O agente não propôs uma resposta. Revise o cenário ou a configuração.',
+        });
+    };
+    // ⚠️ RASCUNHO (modo assistido) não fecha o turno com checkpoint. O checkpoint
+    // da prévia não é gravado (a prévia retorna antes do `insertCheckpoint`, logo
+    // abaixo) e o `reply-drafts.ts` não o lê — só a prévia de TESTE (sandbox) o
+    // mostra na tela. Mesmo assim, a chamada de fechamento segurava a entrega do
+    // rascunho: medido em produção (gpt-6-luna, 2026-09-24), resposta pronta às
+    // 12:32:40 e rascunho entregue às 12:32:56 — 16 dos 28 s que o operador
+    // esperava depois de clicar em "Sugerir resposta".
+    if (preview?.kind === 'assisted') {
+      avisarSemCandidato(preview);
+      return;
+    }
     const closing = await runModelCall(
       pool,
       deps.llmCfg,
@@ -4219,11 +4511,7 @@ async function executarTurnoDoAgente(
 
     if (preview) {
       preview.result.checkpoint = content;
-      if (preview.result.candidates.length === 0 && preview.result.impediments.length === 0)
-        preview.result.impediments.push({
-          code: 'no_candidate',
-          message: 'O agente não propôs uma resposta. Revise o cenário ou a configuração.',
-        });
+      avisarSemCandidato(preview);
       return;
     }
 
@@ -4617,6 +4905,27 @@ export function createInboundTurnHandler(deps: InboundTurnDeps) {
           error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
         });
       }
+      // #1648 — AS DETERMINÍSTICAS ANTES DO RASCUNHO. Este ramo devolvia
+      // antes das detecções de STOP/opt-out e de pedido de humano: o contato
+      // escrevia "SAIR" e nada era registrado, os follow-ups agendados seguiam
+      // vivos e "quero falar com uma pessoa" virava só um rascunho — risco de
+      // LGPD, porque o pedido de parar ficava dependendo de uma aprovação que
+      // podia nunca vir. `true` = turno silenciado (aviso enviado, silêncio
+      // durável, crons cancelados, item na Central) → sem rascunho algum.
+      if (
+        await deteccoesDeterministicasDoAssistido(pool, deps, {
+          job,
+          tenantId: job.organization_id,
+          conversationId: payload.conversation_id,
+          channelSessionId: payload.channel_session_id,
+          leadId: job.contact_id,
+          agent: operationAgent,
+          log: deps.log,
+          inboundMessageId: payload.inbound_message_id,
+        })
+      ) {
+        return;
+      }
       const { generateReplyDraft } = await import('./reply-drafts');
       if (!job.contact_id) throw new Error('reply_without_contact');
       await generateReplyDraft(pool, deps, {
@@ -4630,6 +4939,26 @@ export function createInboundTurnHandler(deps: InboundTurnDeps) {
       return;
     }
     if (operationAgent?.pausedAt) return;
+    // UMA RESPOSTA POR MENSAGEM: um turno que rodou antes deste pode ter lido a
+    // mensagem que acordou este job e já respondido a ela — ver o cabeçalho de
+    // `turno-ja-respondido.ts`, com o caso medido. A anotação vem DEPOIS da
+    // pergunta e ANTES de `runAgentTurn` ler a conversa: é ela que deixa o
+    // próximo turno fazer a mesma pergunta a respeito deste.
+    const alvo = {
+      organizationId: job.organization_id,
+      contactId: job.contact_id,
+      conversationId: payload.conversation_id,
+      jobId: job.id,
+    };
+    if (await ultimaInboundJaRespondida(pool, alvo)) {
+      deps.log.info('turno pulado — outro turno já viu e respondeu a última mensagem do cliente', {
+        job_id: job.id,
+        conversation_id: payload.conversation_id,
+        inbound_message_id: payload.inbound_message_id,
+      });
+      return;
+    }
+    await anotarUltimaInboundVista(pool, alvo);
     await runAgentTurn(deps, job, pool, ctx, {
       resolvedAgent,
       channelSessionId: payload.channel_session_id,

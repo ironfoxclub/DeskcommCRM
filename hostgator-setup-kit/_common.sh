@@ -174,6 +174,63 @@ sincronizar_smtp_do_gotrue() {
   set_env_var "$env_sb" SMTP_SENDER_NAME "$(valor_compose "${nome:-${APP_NAME:-DeskcommCRM}}")"
 }
 
+# ── `so_convite` fecha o caminho DIRETO do GoTrue (#1653) ────────────────────
+#
+# O CRM já recusava cadastro sem convite na tela, na server action e na volta do
+# Google, mas o GoTrue continuava aceitando `POST /auth/v1/signup` — com a anon
+# key que vai para o navegador. A instalação que escolheu "só convite" acumulava
+# conta que ninguém autorizou, e o dono não tinha porta para fechar.
+#
+# A única trava que fecha esse caminho é o `disable_signup` do próprio GoTrue, e
+# ele NÃO tem API de configuração no self-hosted: medido no fonte
+# supabase/auth v2.196.0, as rotas `/admin` são audit, users, generate_link, sso
+# e oauth — nenhuma de config. Então o valor mora no `.env` do Supabase, na
+# chave OFICIAL `DISABLE_SIGNUP`: o compose do Supabase no ref pinado já a
+# mapeia (`GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP}`) e o `.env.example` dele a
+# traz como `false`. Uma variável nossa ao lado seria sombra: o override passaria
+# a ignorar a oficial, e quem fechou o cadastro pela receita do Supabase seria
+# reaberto em silêncio.
+#
+# Quem manda é o modo que o APP enxerga, na mesma precedência de
+# lib/auth/politica-de-cadastro.ts: a linha de `platform_settings` (a tela de
+# `/admin/cadastro`); sem linha, o piso `SIGNUP_MODE` do `.env` do CRM; valor
+# irreconhecível no piso vale `aberto`. `so_convite` → true, os outros → false.
+# Usar `aberto` quando falta a linha deixaria justamente a instalação que
+# declarou `SIGNUP_MODE=so_convite` com o CRM fechado e o GoTrue aberto.
+#
+# Idempotente, e quem chama só reinicia o `auth` quando o arquivo MUDOU. Devolve
+# 1 (sem tocar em nada) quando o valor já é o do modo, quando o banco não
+# respondeu ou quando a coluna ainda não existe (instalação anterior à 0253):
+# reabrir ou fechar o cadastro de uma instalação por causa de um soluço do
+# banco seria o mesmo defeito que o memo pegajoso de `modoDeCadastro()` existe
+# para evitar. "Banco falhou" e "sem linha" são respostas diferentes: a primeira
+# não mexe, a segunda cai no piso.
+sincronizar_signup_mode_do_gotrue() {
+  local env_sb modo alvo atual
+  env_sb="$(dir_do_supabase)/.env"
+  [ -f "$env_sb" ] || return 1
+  modo="$(psql_run -tA -c "select signup_mode from public.platform_settings where id = 1" 2>/dev/null)" || return 1
+  modo="$(printf '%s' "$modo" | tr -d '[:space:]')"
+  if [ -z "$modo" ]; then
+    modo="$(sed -n 's/^SIGNUP_MODE=//p' "${PROJECT_DIR:-$PWD}/.env" 2>/dev/null | tail -n 1 | tr -d "\"' \t\r")"
+    case "$modo" in aberto|com_aprovacao|so_convite) ;; *) modo=aberto ;; esac
+  fi
+  case "$modo" in
+    so_convite) alvo=true ;;
+    aberto|com_aprovacao) alvo=false ;;
+    *) return 1 ;;
+  esac
+  atual="$(sed -n 's/^DISABLE_SIGNUP=//p' "$env_sb" | tail -n 1 | tr -d "\"' \t\r")"
+  [ "$atual" = "$alvo" ] && return 1
+  set_env_var "$env_sb" DISABLE_SIGNUP "$alvo"
+  if [ "$alvo" = true ]; then
+    c_ylw "Cadastro direto no Supabase: FECHADO (a instalação está em 'só convite'; convites seguem funcionando)."
+  else
+    c_ylw "Cadastro direto no Supabase: ABERTO (acompanha o modo '$modo' da instalação)."
+  fi
+  return 0
+}
+
 # ── O update.sh leva o Supabase até a versão pinada ──────────────────────────
 #
 # O `update.sh` oficial do Supabase faz o merge de três vias dos arquivos dele
@@ -193,7 +250,20 @@ atualizar_supabase_single_server() {
       c_ylw "⚠ O Supabase não foi atualizado; segue na versão ${atual:-anterior}. A próxima atualização tenta de novo."
     fi
   fi
-  dc_supabase up -d --wait
+  dc_supabase up -d --wait || return 1
+  # #1653 — a sincronização do modo de cadastro mora AQUI, no corpo desta
+  # função, e não numa linha do update.sh. Na atualização que traz este
+  # conserto, quem executa é o update.sh ANTIGO: o bash segue lendo o arquivo
+  # que abriu, e uma linha nova no texto do update.sh nunca roda (medido: o
+  # `git checkout` troca o inode e o script antigo vai até o fim). O que o
+  # update.sh antigo faz depois do checkout é reler este `_common.sh` e chamar
+  # esta função — em toda versão com single-server (desde a v1.42.0) —, então
+  # é o corpo NOVO dela que roda já na primeira atualização. Falha aqui é
+  # aviso, não saída 1: o CRM segue atualizável.
+  if sincronizar_signup_mode_do_gotrue; then
+    dc_supabase up -d --no-deps auth >/dev/null 2>&1 || c_ylw "⚠ Não consegui reiniciar o auth do Supabase com o modo de cadastro (#1653)."
+  fi
+  return 0
 }
 
 # Nome FÍSICO do volume que guarda as sessões do WAHA. `docker compose config
@@ -1666,4 +1736,69 @@ ensure_encryption_key() {
     >/dev/null 2>&1 \
     && c_grn "✓ chave de cifra ativa no banco (segredos de webhook são guardados cifrados)" \
     || c_ylw "⚠ não consegui semear a chave de cifra no banco — segredos de webhook não poderão ser salvos até rodar update.sh de novo."
+}
+
+# ── A ÚLTIMA RELEASE ESTÁVEL PUBLICADA ──────────────────────────────────────
+#
+# ⚠️ TAG EXISTIR NÃO É RELEASE PUBLICADA, e confundir as duas instala código
+# que ninguém lançou.
+#
+# Caso real (2026-09-13): `v1.20.0` existe como tag annotated criada À MÃO no
+# repositório oficial — a mensagem da própria tag registra que o CI recusou
+# criá-la — enquanto `/releases/latest` continuava devolvendo `v1.19.0`.
+# `git tag -l 'v*' --sort=-v:refname | head -1`, que era o que este kit usava,
+# responde "v1.20.0" e manda todo clone do mundo instalar um código sem
+# release, sem changelog e sem os cinco checks obrigatórios da `main`.
+#
+# `/releases/latest` é a pergunta certa: a própria API do GitHub define esse
+# endpoint como a última release que NÃO é draft e NÃO é prerelease — os dois
+# filtros que queremos, aplicados na origem, sem precisar ordenar nada aqui.
+#
+# O repositório sai do `origin` (e não de uma constante) para que um fork com
+# releases próprias funcione sem editar o kit; `DESKCOMM_RELEASES_LATEST_URL`
+# troca o endereço inteiro quando é preciso.
+#
+# Devolve string VAZIA quando não dá para saber (sem rede, API fora, fork sem
+# release). Vazio é "não sei" — e quem chama TEM de tratar isso como "não sei",
+# nunca como "não há versão nova". Cair de volta para `git tag` aqui seria
+# reintroduzir exatamente o defeito que esta função existe para matar.
+ultima_release_estavel() {
+  local origem slug url tag
+  origem="$(git config --get remote.origin.url 2>/dev/null || true)"
+
+  # Endereço explícito primeiro: é o caminho dos testes (um JSON local via
+  # `file://`) e de quem opera um fork com releases num lugar próprio.
+  url="${DESKCOMM_RELEASES_LATEST_URL:-}"
+
+  if [ -z "$url" ]; then
+    case "$origem" in
+      https://github.com/*|http://github.com/*|git@github.com:*)
+        slug="$(printf '%s' "$origem" \
+          | sed -E 's#^git@github\.com:#https://github.com/#; s#\.git$##; s#^https?://[^/]+/##')"
+        url="https://api.github.com/repos/${slug}/releases/latest"
+        ;;
+      *)
+        # Origin FORA do GitHub (espelho, caminho local): ali não existe API de
+        # release, e a maior tag é a única resposta que existe — o mesmo que o
+        # kit fazia antes. Toda instalação real clona do GitHub (install.sh) e
+        # nunca cai aqui; quem cai é o repositório descartável dos testes.
+        git tag -l 'v*' --sort=-v:refname | head -1
+        return 0
+        ;;
+    esac
+  fi
+
+  # `-f` faz o curl falhar em 404 (repo sem release nenhuma) em vez de devolver
+  # o corpo de erro, que o sed abaixo interpretaria como ausência de tag_name.
+  tag="$(curl -fsSL --max-time 20 -H 'Accept: application/vnd.github+json' "$url" 2>/dev/null \
+    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+
+  # Sem jq de propósito: o kit não pode exigir jq numa VPS de cliente. O
+  # `tag_name` é o primeiro campo desse formato no JSON de uma release e não
+  # contém aspas, então o sed é suficiente — e a validação abaixo recusa
+  # qualquer coisa que não tenha cara de versão, em vez de confiar no parse.
+  case "$tag" in
+    v[0-9]*) printf '%s\n' "$tag" ;;
+    *) printf '' ;;
+  esac
 }

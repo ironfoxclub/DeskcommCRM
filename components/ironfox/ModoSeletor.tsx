@@ -1,5 +1,6 @@
 "use client";
 import { useAuth } from "@/hooks/auth/AuthProvider";
+import { useT } from "@/hooks/i18n/useT";
 import { cn } from "@/lib/utils";
 
 /*
@@ -27,6 +28,7 @@ const INATIVO = "text-[#E9E8E2]/60 hover:bg-[#E9E8E2]/5 hover:text-[#E9E8E2]";
 
 export function ModoSeletor({ collapsed }: { collapsed: boolean }) {
   const { user } = useAuth();
+  const t = useT();
   if (!user.is_platform_admin) return null;
 
   return (
@@ -41,8 +43,8 @@ export function ModoSeletor({ collapsed }: { collapsed: boolean }) {
       <a href={ATALHO_DO_VULCANOS} title={collapsed ? "Forja" : undefined} className={cn(SEGMENTO, INATIVO)}>
         {collapsed ? <SimboloDoVulcanOS className="h-4 w-4" /> : "Forja"}
       </a>
-      <span aria-current="page" title={collapsed ? "Operação" : undefined} className={cn(SEGMENTO, ATIVO)}>
-        {collapsed ? <IconeDoCRM className="h-4 w-4" /> : "Operação"}
+      <span aria-current="page" title={collapsed ? t("Operação") : undefined} className={cn(SEGMENTO, ATIVO)}>
+        {collapsed ? <IconeDoCRM className="h-4 w-4" /> : t("Operação")}
       </span>
     </div>
   );
