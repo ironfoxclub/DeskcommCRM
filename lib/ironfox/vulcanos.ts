@@ -13,7 +13,7 @@ import { safeNext } from "@/lib/auth/safe-next";
  * Fixo aqui, e não numa NEXT_PUBLIC_*, porque a imagem Docker queima essas no
  * build com placeholder (ver app/public-env-script.tsx).
  */
-export const URL_DO_VULCANOS = "https://vulcanos-app.vercel.app";
+export const URL_DO_VULCANOS = "https://vulcanos.ironfoxclub.com";
 
 /**
  * Trava contra vai e volta: `/auth/vulcanos` grava este cookie por um minuto e a
