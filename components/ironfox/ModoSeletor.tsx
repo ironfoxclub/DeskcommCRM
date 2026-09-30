@@ -2,6 +2,7 @@
 import { useAuth } from "@/hooks/auth/AuthProvider";
 import { useT } from "@/hooks/i18n/useT";
 import { cn } from "@/lib/utils";
+import { mostrarEntrada } from "@/lib/ironfox/entrada-de-modo";
 
 /*
  * Fork IronFox: seletor de modo Forja (VulcanOS) / Operação (este CRM).
@@ -17,6 +18,7 @@ import { cn } from "@/lib/utils";
  * - Ativo: fundo #630102, texto #E9E8E2. Inativo: transparente, texto
  *   #E9E8E2 60%, hover texto 100% + fundo #E9E8E2 5%.
  * - Recolhido: segmentos empilhados, só ícone 16px (VulcanOS / CRM) com title.
+ * - Clique em Forja: pop-up "Entrando na Forja" (lib/ironfox/entrada-de-modo.ts).
  * Único ajuste daqui: mt-2, porque o cabeçalho do CRM termina numa borda.
  */
 
@@ -40,7 +42,10 @@ export function ModoSeletor({ collapsed }: { collapsed: boolean }) {
         collapsed ? "grid-cols-1" : "grid-cols-2",
       )}
     >
-      <a href={ATALHO_DO_VULCANOS} title={collapsed ? "Forja" : undefined} className={cn(SEGMENTO, INATIVO)}>
+      <a
+        href={ATALHO_DO_VULCANOS}
+        onClick={(e) => mostrarEntrada("forja", e)}
+        title={collapsed ? "Forja" : undefined} className={cn(SEGMENTO, INATIVO)}>
         {collapsed ? <SimboloDoVulcanOS className="h-4 w-4" /> : "Forja"}
       </a>
       <span aria-current="page" title={collapsed ? t("Operação") : undefined} className={cn(SEGMENTO, ATIVO)}>

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { safeNext } from "@/lib/auth/safe-next";
 import { cookieSecure } from "@/lib/supabase/cookie-secure";
 import { COOKIE_EQUIPE_IRONFOX, COOKIE_TENTATIVA_LOGIN_CENTRAL } from "@/lib/ironfox/vulcanos";
+import { paginaDaEntrada } from "@/lib/ironfox/entrada-de-modo";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
 
@@ -72,20 +73,10 @@ export async function GET(request: NextRequest) {
 
 function ponte(caminho: string, org: string | null): NextResponse {
   const destino = new URL(caminho, env.NEXT_PUBLIC_APP_URL).toString();
-  const seguro = destino
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  // Mesmo pop-up do clique em "Operação" lá no VulcanOS, continuando enquanto o
+  // CRM carrega (lib/ironfox/entrada-de-modo.ts).
   const resposta = new NextResponse(
-    `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">` +
-      `<meta name="robots" content="noindex">` +
-      `<noscript><meta http-equiv="refresh" content="0;url=${seguro}"></noscript>` +
-      `<title>Entrando…</title></head><body>` +
-      `<p>Entrando no CRM…</p>` +
-      `<script>location.replace(${JSON.stringify(destino).replace(/</g, "\u003c")})</script>` +
-      `<noscript><p><a href="${seguro}">Continuar</a></p></noscript>` +
-      `</body></html>`,
+    paginaDaEntrada("operacao", destino),
     {
       status: 200,
       headers: {
