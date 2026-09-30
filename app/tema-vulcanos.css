@@ -2,7 +2,7 @@
    Tema VulcanOS (fork IronFox) — só no modo ESCURO.
 
    Replica a casca do VulcanOS (vulcanos-app/src/components/app-shell.tsx):
-   breu quente #13100F com manchas vinho em degradê, granulado por cima,
+   preto neutro #0B0B0D (o do Etna) com manchas vinho leves em degradê, granulado por cima,
    sidebar sem fundo e o conteúdo numa placa de vidro fosco flutuante.
 
    Mora num arquivo só, e sem layer, de propósito:
@@ -21,9 +21,9 @@
 
 :root[data-theme="dark"] {
   /* Superfícies */
-  --color-bg: #13100f;
-  --color-surface: #1a1613;
-  --color-surface-elevated: #221d19;
+  --color-bg: #0b0b0d;
+  --color-surface: #141417;
+  --color-surface-elevated: #1a1a1e;
   --color-overlay: rgba(0, 0, 0, 0.6);
 
   /* Texto — o #E9E8E2 do VulcanOS */
@@ -48,7 +48,7 @@
   --color-accent-900: #4a0102;
   --color-accent-950: #2a0001;
   --color-accent: var(--color-accent-400);
-  --color-accent-fg: #13100f;
+  --color-accent-fg: #0b0b0d;
   --color-accent-soft: rgba(99, 1, 2, 0.28);
   --color-accent-hover: var(--color-accent-300);
   --ring: var(--color-accent-400);
@@ -145,7 +145,7 @@ p.text-\[28px\] > span.text-\[12px\] {
 [data-theme="dark"] [data-casca="raiz"] {
   position: relative;
   isolation: isolate;
-  background-color: #13100f;
+  background-color: #0b0b0d;
 }
 
 [data-theme="dark"] [data-casca="raiz"]::before {
@@ -155,9 +155,9 @@ p.text-\[28px\] > span.text-\[12px\] {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(circle at 15% 15%, rgba(99, 1, 2, 0.14), transparent 35%),
+    radial-gradient(circle at 15% 15%, rgba(99, 1, 2, 0.06), transparent 35%),
     radial-gradient(circle at 85% 10%, rgba(233, 232, 226, 0.03), transparent 32%),
-    radial-gradient(circle at 50% 100%, rgba(99, 1, 2, 0.1), transparent 48%);
+    radial-gradient(circle at 50% 100%, rgba(99, 1, 2, 0.04), transparent 48%);
 }
 
 [data-theme="dark"] [data-casca="raiz"]::after {
@@ -247,7 +247,7 @@ p.text-\[28px\] > span.text-\[12px\] {
     outline: 1px solid rgba(233, 232, 226, 0.1);
     outline-offset: -1px;
     border-radius: 16px;
-    background-color: rgba(19, 16, 15, 0.7);
+    background-color: rgba(11, 11, 13, 0.7);
     backdrop-filter: blur(24px) saturate(1.6);
     -webkit-backdrop-filter: blur(24px) saturate(1.6);
     box-shadow:
@@ -286,7 +286,7 @@ p.text-\[28px\] > span.text-\[12px\] {
 [data-theme="dark"] .bg-popover,
 [data-theme="dark"] [role="dialog"].bg-background,
 [data-theme="dark"] [role="alertdialog"].bg-background {
-  background-color: rgba(26, 22, 19, 0.82);
+  background-color: rgba(17, 17, 20, 0.82);
   backdrop-filter: blur(20px) saturate(1.6);
   -webkit-backdrop-filter: blur(20px) saturate(1.6);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);

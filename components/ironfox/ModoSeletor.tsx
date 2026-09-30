@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
  *
  * Medidas (iguais às da VulcanOS; mudar lá e aqui juntas):
  * - Caixa: margem lateral 12px (mx-3), padding 2px, gap 2px, raio 8px,
- *   borda #E9E8E2 10%, fundo #13100F.
+ *   borda #E9E8E2 10%, fundo #0B0B0D.
  * - Segmento: altura 32px, raio 6px, fonte 12px peso 500.
  * - Ativo: fundo #630102, texto #E9E8E2. Inativo: transparente, texto
  *   #E9E8E2 60%, hover texto 100% + fundo #E9E8E2 5%.
@@ -36,7 +36,7 @@ export function ModoSeletor({ collapsed }: { collapsed: boolean }) {
       role="group"
       aria-label="Modo"
       className={cn(
-        "mx-3 mt-2 grid gap-0.5 rounded-lg border border-[#E9E8E2]/10 bg-[#13100F] p-0.5 text-xs font-medium",
+        "mx-3 mt-2 grid gap-0.5 rounded-lg border border-[#E9E8E2]/10 bg-[#0B0B0D] p-0.5 text-xs font-medium",
         collapsed ? "grid-cols-1" : "grid-cols-2",
       )}
     >
