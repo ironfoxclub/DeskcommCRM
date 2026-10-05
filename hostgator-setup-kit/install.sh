@@ -1708,6 +1708,11 @@ esac
   # `latest-2026.7.2` é o mesmo digest de `latest` hoje (65e593e30bb7…).
   envq WAHA_IMAGE "${WAHA_IMAGE:-devlikeapro/waha:latest-2026.7.2}"
   envq WAHA_DEFAULT_ENGINE "${WAHA_DEFAULT_ENGINE:-NOWEB}"
+  # Mesmo raciocínio do WAHA_IMAGE acima: em ARM64, verificar_arquitetura_do_kit
+  # (_common.sh) já exportou WAHA_IMAGE/SRH_IMAGE com a variante certa antes de
+  # chegar aqui — o `${VAR:-default}` só usa o default amd64 quando a variável
+  # ainda não existe.
+  envq SRH_IMAGE "${SRH_IMAGE:-hiett/serverless-redis-http@sha256:5b0bb9239fce53abf87b2018a7a0deb9ec7bd900c5360738fe5fbeeb426f9150}"
   envq UPSTASH_REDIS_REST_URL "http://srh:80"
   envq UPSTASH_REDIS_REST_TOKEN "$UPSTASH_REDIS_REST_TOKEN"
   envq SRH_TOKEN "$SRH_TOKEN"

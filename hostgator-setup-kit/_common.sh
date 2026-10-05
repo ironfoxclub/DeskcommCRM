@@ -12,16 +12,26 @@ COMPOSE_NPM="docker-compose.npm.yml"
 COMPOSE_BUILD="docker-compose.build.yml"
 
 # ── Arquitetura das imagens publicadas ───────────────────────────────────────
-# O registry publica hoje somente linux/amd64. Sem esta guarda, ARM64 chega até
-# o pull e morre com "no matching manifest"; o update.sh traduzia isso como
+# O registry publica hoje só linux/amd64 (app/worker/scheduler — ver
+# .github/workflows/publish-image.yml). Sem NENHUMA guarda, ARM64 chegaria até
+# o pull e morreria com "no matching manifest"; o update.sh traduzia isso como
 # pacote ainda publicando/privado, um diagnóstico que manda repetir algo que
 # nunca vai funcionar nessa máquina.
+#
+# ARM64/aarch64 conta como suportada (não é mais exit 1): o próprio kit já tem
+# o caminho pra isso — `construir_aqui_e_subir`, abaixo — que builda as 3
+# imagens do código local em vez de baixar prontas. O que esta função faz
+# agora é só decidir se a arquitetura é reconhecida; quem decide pull-vs-build
+# é o código de saída do `dc pull` em install.sh (linha ~2099), como já era
+# pra qualquer outra falha de pull. Ajustado nesta sessão (2026-09-22) porque
+# a Oracle Cloud Free Tier só oferece VM grande de graça em ARM (Ampere A1) —
+# ver o comentário de construir_aqui_e_subir, que já citava esse caso.
 #
 # A decisão fica pura no argumento para os testes simularem a arquitetura sem
 # depender do runner. A leitura de `uname -m` é o único ponto ligado ao host.
 arquitetura_suportada_pelo_kit() {
   case "${1:-}" in
-    x86_64|amd64) return 0 ;;
+    x86_64|amd64|aarch64|arm64) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -29,12 +39,35 @@ arquitetura_suportada_pelo_kit() {
 verificar_arquitetura_do_kit() {
   local arch
   arch="$(uname -m 2>/dev/null || printf 'desconhecida')"
-  arquitetura_suportada_pelo_kit "$arch" && return 0
+  arquitetura_suportada_pelo_kit "$arch" || {
+    printf '%s\n' \
+      "✖ Este servidor usa arquitetura '$arch', que o kit não reconhece." \
+      "  Use x86_64/amd64 ou aarch64/arm64." >&2
+    return 1
+  }
 
-  printf '%s\n' \
-    "✖ Este servidor usa arquitetura '$arch', mas as imagens publicadas do DeskcommCRM hoje são linux/amd64." \
-    "  Use uma VPS x86_64/amd64. Repetir o download não resolve; ARM64 só será suportado quando houver imagens multi-arquitetura." >&2
-  return 1
+  case "$arch" in
+    aarch64|arm64)
+      # As imagens de terceiros (WAHA, srh) são pull normal, não build — essas
+      # PRECISAM da tag/digest certa pra arquitetura, senão falham antes de
+      # chegar no `construir_aqui_e_subir`. app/worker/scheduler não entram
+      # aqui: são as 3 que o kit builda local, resolvidas mais abaixo.
+      # Só define se o dono não tiver posto a própria escolha no ambiente.
+      printf '%s\n' \
+        "⚠ VPS ARM64 detectada. As imagens prontas do DeskcommCRM (app/worker/" \
+        "  scheduler) só existem em amd64 — o install.sh vai puxar, falhar como" \
+        "  esperado, e cair no build local que o kit já sabe fazer (15-25min)." \
+        "  WAHA e srh trocam sozinhos pra imagem ARM equivalente." >&2
+      export WAHA_IMAGE="${WAHA_IMAGE:-devlikeapro/waha:noweb-arm-2026.7.2}"
+      # `srh` normalmente fica pinado por DIGEST amd64 (ver docker-compose.prod.yml)
+      # por estabilidade de conteúdo numa instalação já rodando — não se aplica
+      # a uma instalação nova, então aqui usa a tag flutuante multi-arch. Só não
+      # foi verificado de fato rodando em ARM: confirmar antes de depender disso
+      # em produção (rate limit/debounce do RAG passam por aqui).
+      export SRH_IMAGE="${SRH_IMAGE:-hiett/serverless-redis-http:0.0.10}"
+      ;;
+  esac
+  return 0
 }
 
 # Este arquivo é compartilhado por várias ferramentas. A limitação de imagem só

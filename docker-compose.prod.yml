@@ -188,7 +188,12 @@ services:
     # O digest congela o que já está em produção HOJE: zero mudança de conteúdo,
     # e o `:latest` deixa de poder mudar sozinho debaixo de todo mundo.
     # Quando a T6 for validada, isto vira `:0.0.10` e o comentário sai.
-    image: hiett/serverless-redis-http@sha256:5b0bb9239fce53abf87b2018a7a0deb9ec7bd900c5360738fe5fbeeb426f9150
+    #
+    # Parametrizado (SRH_IMAGE) porque esse digest é single-arch (amd64) — numa
+    # instalação NOVA em ARM64 não existe "produção rodando" pra proteger, então
+    # `_common.sh` troca sozinho pra tag flutuante `:0.0.10` (multi-arch) nesse
+    # caso. Sem override, comporta-se exatamente como antes.
+    image: ${SRH_IMAGE:-hiett/serverless-redis-http@sha256:5b0bb9239fce53abf87b2018a7a0deb9ec7bd900c5360738fe5fbeeb426f9150}
     restart: unless-stopped
     environment:
       SRH_MODE: env

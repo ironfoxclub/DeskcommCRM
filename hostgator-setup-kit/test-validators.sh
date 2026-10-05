@@ -51,13 +51,17 @@ crontab -l >"$CRONTAB_REAL_ANTES" 2>/dev/null || : >"$CRONTAB_REAL_ANTES"
 
 # dublar_uname_amd64 <diretório bin do sandbox>
 #
-# O `_common.sh` recusa, logo que é carregado, todo install.sh/update.sh que não
-# roda em amd64 — a imagem publicada é só linux/amd64. Os cenários que executam
-# esses scripts de verdade medem o INSTALADOR, não o processador de quem roda a
-# suíte: sem este dublê, num Mac Apple Silicon (`arm64`) todos eles paravam na
-# guarda (medido: 22 asserções vermelhas, a maioria "inconclusivo"). A recusa de
-# ARM tem prova própria em tests/shell/arquitetura-kit.test.sh. Só `uname -m` é
-# dublado; qualquer outro uso vai ao `uname` real.
+# Desde 2026-09-22 o `_common.sh` aceita amd64 E arm64 (builda local nas
+# imagens que só existem prontas em amd64 — ver `verificar_arquitetura_do_kit`),
+# mas num Mac Apple Silicon (`arm64`) rodando a suíte, o aviso de ARM entra no
+# `stdout`/`stderr` de TODO cenário que carrega o `_common.sh`, sem relação com
+# o que aquele cenário está medindo — ruído, não sinal (medido antes desta
+# troca: 22 asserções vermelhas, a maioria "inconclusivo", só por causa do
+# aviso extra). Este dublê fixa amd64 pra isolar o processador de quem roda a
+# suíte do que o INSTALADOR está sendo testado. A guarda de arquitetura em si
+# (aceita/recusa, e o que ela grava em WAHA_IMAGE/SRH_IMAGE) tem prova própria
+# em tests/shell/arquitetura-kit.test.sh. Só `uname -m` é dublado; qualquer
+# outro uso vai ao `uname` real.
 UNAME_REAL="$(command -v uname)"
 dublar_uname_amd64() {
   cat > "$1/uname" <<STUB
