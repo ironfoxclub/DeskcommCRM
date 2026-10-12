@@ -99,7 +99,14 @@ describe("fn_enfileirar_midia_vencida", () => {
   it("a segunda rodada não enfileira de novo", () => {
     sql(`select public.fn_enfileirar_midia_vencida(500)`);
     const r = JSON.parse(lastLine(sql(`select public.fn_enfileirar_midia_vencida(500)::text`)));
-    expect(r).toEqual({ vencidas: 0, orfas: 0 });
+    // `expurgadas` entra no objeto esperado pela 0435 (#1765): a chave nova é
+    // aditiva EM VALOR, mas `toEqual` do Vitest é exato EM CHAVE, e este
+    // congelado fiscaliza o retorno INTEIRO. Dar a ele o campo novo é a menor
+    // edição que preserva o que a asserção mede — mais forte, na verdade: antes
+    // ela não vigiava a contagem do expurgo, agora vigia (é 0 aqui porque este
+    // fixture não tem linha `deleted` vencida, e é `poda-de-midia-contagem-do-
+    // expurgo.test.ts` que cobre o valor diferente de zero).
+    expect(r).toEqual({ vencidas: 0, orfas: 0, expurgadas: 0 });
   });
 
   it("retenção abaixo de 30 dias vale como 30 — o piso do formulário", () => {

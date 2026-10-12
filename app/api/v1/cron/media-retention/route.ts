@@ -16,7 +16,11 @@
  * é a própria linha da fila (status, tentativas, erro). A RODADA audita
  * (`retention.sweep_run`, como o `data-retention`) só quando teve efeito ou
  * falhou: rodada vazia não é mutação, e a que apaga dado de cliente não pode
- * ser indistinguível dela.
+ * ser indistinguível dela. "Teve efeito" inclui o EXPURGO (#1765): a função
+ * também expurga a linha `deleted` da retenção com mais de 90 dias, e uma
+ * rodada que só fez isso apaga linha de verdade — só que `vencidas` e `orfas`
+ * vinham zeradas, então ela não auditava e a linha de rastro que existia não
+ * dizia quantas saíram da fila.
  *
  * Auth: `Authorization: Bearer <INTERNAL_CRON_SECRET>` (fail-closed).
  */
@@ -43,7 +47,13 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   const admin = createAdminClient();
-  const total = { vencidas: 0, orfas: 0, tandas: 0 };
+  // `expurgadas` é a contagem do que saiu da FILA (linha `deleted` da
+  // retenção com mais de 90 dias), e ela entra na soma do efeito porque
+  // é mutação: sem ela na conta, a rodada que só expurgou sairia com
+  // `vencidas + orfas = 0` e não auditava (#1765). `tandas` continua o que era:
+  // quantas chamadas a função recebeu, para saber se a rodada esbarrou no
+  // teto e sobrou trabalho para a próxima.
+  const total = { vencidas: 0, orfas: 0, expurgadas: 0, tandas: 0 };
   for (let i = 0; i < MAX_TANDAS; i++) {
     const { data, error } = await admin.rpc("fn_enfileirar_midia_vencida" as never, { p_limite: TANDA } as never);
     if (error) {
@@ -57,17 +67,26 @@ export async function GET(req: NextRequest): Promise<Response> {
       });
       return fail("internal_error", "media_retention_failed", 500, { requestId });
     }
-    const r = (data ?? {}) as { vencidas?: number; orfas?: number };
+    // `expurgadas` é o único campo novo (#1765); o `?? 0` também protege a
+    // leitura de uma função antiga em caso de a 0435 ainda não ter rodado
+    // no banco (mesma razão do `?? 0` dos outros dois).
+    const r = (data ?? {}) as { vencidas?: number; orfas?: number; expurgadas?: number };
     const vencidas = r.vencidas ?? 0;
     const orfas = r.orfas ?? 0;
+    const expurgadas = r.expurgadas ?? 0;
     total.vencidas += vencidas;
     total.orfas += orfas;
+    total.expurgadas += expurgadas;
     total.tandas += 1;
     // Tanda incompleta nas duas categorias = não sobrou nada para esta rodada.
+    // O expurgo não entra no laço: ele é livre de `p_limite` e a segunda
+    // chamada de uma mesma rodada devolve 0 para ele de qualquer jeito, então
+    // parar por causa dele seria parar uma tanda antes de enfileirar o que
+    // ainda cabe.
     if (vencidas < TANDA && orfas < TANDA) break;
   }
 
-  if (total.vencidas + total.orfas > 0) {
+  if (total.vencidas + total.orfas + total.expurgadas > 0) {
     logger.info("[media-retention] arquivos enfileirados para remoção", { request_id: requestId, ...total });
     void audit({
       action: "retention.sweep_run",

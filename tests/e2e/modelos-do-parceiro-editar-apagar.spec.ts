@@ -40,7 +40,7 @@ const CONTA = "ACC-E2E-MODELOS";
 const TEM_DUBLE = process.env.ZERNIO_API_BASE_URL === URL_DO_DUBLE && process.env.ZERNIO_ACCOUNT_ID === CONTA;
 
 const CREDS_PATH = path.join(process.cwd(), ".e2e-creds.json");
-const EVIDENCIA = process.env.E2E_EVIDENCIA ?? path.join(process.cwd(), ".superpowers/evidence/modelos-do-parceiro");
+const EVIDENCIA = process.env.E2E_EVIDENCIA ?? path.join(process.cwd(), "evidence/modelos-do-parceiro");
 
 interface Creds {
   password: string;
