@@ -123,6 +123,9 @@ jobs:
 
       - name: Conferir (tipos e testes do fork)
         if: steps.alvo.outputs.seguir == 'sim'
+        env:
+          # o projeto cresceu: o tsc estoura os 4 GB padrão do node (saída 134)
+          NODE_OPTIONS: --max-old-space-size=8192
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
